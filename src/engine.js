@@ -150,6 +150,27 @@ function sanitizeBag(bag){
   }
 }
 
+// ---------- 存档导出 / 导入 ----------
+// 纯 localStorage 的游戏，清缓存 / 换设备会丢进度，因此提供文本形式的备份与恢复。
+function exportSaveText(){
+  try { return localStorage.getItem(SAVE_KEY) || ''; } catch(e){ return ''; }
+}
+function importSaveText(raw){
+  if (!raw || typeof raw !== 'string') return { ok:false, reason:'内容为空' };
+  let d;
+  try { d = JSON.parse(raw); } catch(e){ return { ok:false, reason:'不是合法的 JSON' }; }
+  if (!d || typeof d !== 'object' || Array.isArray(d)) return { ok:false, reason:'格式不是存档对象' };
+  if (!isFinite(d.coins) || typeof d.inventory !== 'object' || typeof d.skills !== 'object'){
+    return { ok:false, reason:'缺少存档字段（coins / inventory / skills）' };
+  }
+  try { localStorage.setItem(SAVE_KEY, JSON.stringify(d)); }
+  catch(e){ return { ok:false, reason:'写入本地存储失败' }; }
+  loadGame();                       // 复用读档校正（补 skills / 清理非法数量 / 里程碑）
+  return { ok:true, reason:'导入成功' };
+}
+window.exportSaveText = exportSaveText;
+window.importSaveText = importSaveText;
+
 function resetToDefault() {
   const g = cloneDefaultGame();
   Object.assign(Game, g);

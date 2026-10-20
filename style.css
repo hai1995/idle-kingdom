@@ -351,6 +351,15 @@ h3.sec.span{ grid-column:1/-1; margin-top:6px; }
 .mini.lock.on{ opacity:1; border-color:var(--accent); }
 .muted{ color:var(--muted); }
 
+/* 存档导出 / 导入 */
+.save-io{
+  width:100%; min-height:140px; margin:10px 0; resize:vertical; font-family:ui-monospace,Consolas,monospace;
+  font-size:12px; line-height:1.5; color:var(--text); background:var(--panel); border:1px solid var(--border);
+  border-radius:8px; padding:10px; word-break:break-all;
+}
+.save-io-acts{ display:flex; flex-wrap:wrap; gap:8px; margin-top:8px; }
+.modal-acts{ display:flex; flex-wrap:wrap; gap:8px; justify-content:flex-end; }
+
 /* 战斗风格切换 */
 .stylepick{ display:flex; flex-wrap:wrap; align-items:center; gap:8px; margin-bottom:10px; }
 .stylepick .sp-label{ color:var(--muted); font-size:12px; }

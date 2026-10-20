@@ -107,7 +107,7 @@ loadJS('ui.js');
 // 增强 document stub 以支撑渲染用 querySelectorAll(具体选择器)
 const renderTargets = {};
 const mkTarget = ()=>({ innerHTML:'', dataset:{}, classList:{ add(){}, remove(){}, toggle(){} } });
-['content','skills','combat','bank','inventory','equipment','farming','stats','log','shop','queue','fightArea'].forEach(t=>renderTargets[t]=mkTarget());
+['content','skills','combat','bank','inventory','equipment','farming','stats','log','shop','queue','fightArea','modalBox'].forEach(t=>renderTargets[t]=mkTarget());
 context.document.getElementById = (id)=> renderTargets[id] || {
   textContent:'', innerHTML:'', classList:{add(){},remove(){},toggle(){}}, style:{}, appendChild(){},
   addEventListener(){}, querySelector:()=>null, querySelectorAll:()=>[], value:'', checked:false,
@@ -1267,6 +1267,52 @@ try{
   console.log('PASS: 战斗道具与 Boss 专属技能（延迟/消耗/到期/回血/入口）通过');
 }catch(e){
   console.error('FAIL: 战斗道具与 Boss 专属技能: '+e.message); console.error(e.stack); process.exitCode=1;
+}
+
+// ---- 28. 存档导出 / 导入（文本备份，防清缓存丢档）----
+try{
+  G.resetToDefault();
+  ST.Game.coins = 1234;
+  ST.giveItem('normal_log', 3, false);            // 初始 5 + 新增 3
+  G.saveGame();
+
+  // 28a. 导出：拿到合法 JSON 文本
+  const text = G.exportSaveText();
+  assert(!!text && text.length > 0, '导出得到存档文本 -> '+(text?text.length:0)+' 字符');
+  let parsed = null;
+  try { parsed = JSON.parse(text); } catch(e){}
+  assert(parsed && parsed.coins === 1234, '导出文本是合法 JSON 且含当前金币');
+  assert(parsed && parsed.inventory && parsed.skills, '导出文本含 inventory / skills');
+
+  // 28b. 往返：重置后导入能完整恢复
+  G.resetToDefault();
+  assert(ST.Game.coins !== 1234, '重置后金币回到初始值，便于验证导入');
+  const res = G.importSaveText(text);
+  assert(res.ok === true, '导入成功 -> '+res.reason);
+  assert(ST.Game.coins === 1234, '导入后金币恢复 -> '+ST.Game.coins);
+  assert(ST.totalOf('normal_log') === 8, '导入后物品恢复 -> '+ST.totalOf('normal_log'));
+
+  // 28c. 非法输入被拒绝，且不破坏当前存档
+  const coinsBefore = ST.Game.coins;
+  const badCases = [['乱码', 'not json'], ['空内容', ''], ['缺字段', '{"coins":10}'], ['数组', '[1,2,3]'], ['null', 'null']];
+  badCases.forEach(([label, raw])=>{
+    assert(G.importSaveText(raw).ok === false, `拒绝${label}的存档文本`);
+  });
+  assert(ST.Game.coins === coinsBefore, '失败的导入不影响当前存档 -> '+ST.Game.coins);
+
+  // 28d. 页面入口与弹窗
+  G.renderStats();
+  assert(context.document.getElementById('content').innerHTML.includes('openSaveIO'), '统计页渲染导出/导入入口');
+  G.openSaveIO('export');
+  const exportHtml = context.document.getElementById('modalBox').innerHTML;
+  assert(exportHtml.includes('saveText') && exportHtml.includes('1234'), '导出弹窗给出可复制的存档文本');
+  G.openSaveIO('import');
+  assert(context.document.getElementById('modalBox').innerHTML.includes('btnImportSave'), '导入弹窗给出操作按钮');
+  if (ST.UI && ST.UI.closeModal) ST.UI.closeModal();
+
+  console.log('PASS: 存档导出/导入（合法 JSON / 往返恢复 / 非法拒绝 / 入口渲染）通过');
+}catch(e){
+  console.error('FAIL: 存档导出/导入: '+e.message); console.error(e.stack); process.exitCode=1;
 }
 
 console.log('\n=== 引擎冒烟测试结束 ===');

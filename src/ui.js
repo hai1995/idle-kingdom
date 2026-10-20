@@ -1560,8 +1560,12 @@ function renderStats(){
       <h3 class="sec">技能总览</h3>
       <div class="skstlist">${skills}</div>
       <h3 class="sec">关于</h3>
-      <p class="hint">放置王国 · 受梅尔沃启发的一人开发的网页放置游戏。进度自动保存在浏览器本地。</p>
-      <button class="btn-mini danger" onclick="confirmReset()">重置存档</button>
+      <p class="hint">放置王国 · 受梅尔沃启发的一人开发的网页放置游戏。进度自动保存在浏览器本地，建议定期导出备份。</p>
+      <div class="save-io-acts">
+        <button class="btn-mini" onclick="openSaveIO('export')">📤 导出存档</button>
+        <button class="btn-mini" onclick="openSaveIO('import')">📥 导入存档</button>
+        <button class="btn-mini danger" onclick="confirmReset()">重置存档</button>
+      </div>
     </div>`;
 }
 function confirmReset(){
@@ -1680,6 +1684,52 @@ function openSettings(){
 }
 UI.closeModal = function(){ document.getElementById('modal').classList.add('hidden'); };
 UI.openSettings = openSettings;
+
+// ---------- 存档导出 / 导入（文本备份，防清缓存丢档）----------
+function openSaveIO(mode){
+  saveGame();                                   // 导出前先落盘，保证是最新的
+  const box = document.getElementById('modalBox');
+  const isExport = mode === 'export';
+  const text = isExport ? exportSaveText() : '';
+  box.innerHTML = `
+    <h3>${isExport?'📤 导出存档':'📥 导入存档'}</h3>
+    <p class="hint">${isExport
+      ? '复制下面的内容保存到别处（聊天收藏 / 备忘录均可）。清缓存或换设备后，在【统计】页点「导入存档」粘贴即可恢复。'
+      : '粘贴之前导出的内容，导入会覆盖当前进度；读档时会顺便校正数据。'}</p>
+    <textarea id="saveText" class="save-io" spellcheck="false" ${isExport?'readonly':''}>${esc(text)}</textarea>
+    <div class="modal-acts">
+      ${isExport
+        ? '<button class="btn-mini" id="btnCopySave">复制到剪贴板</button>'
+        : '<button class="btn-mini" id="btnImportSave">导入并重载</button>'}
+      <button class="btn-mini" onclick="UI.closeModal()">关闭</button>
+    </div>`;
+  const copyBtn = document.getElementById('btnCopySave');
+  if (copyBtn) copyBtn.addEventListener('click', ()=>{
+    const area = document.getElementById('saveText');
+    const txt = (area && area.value) || '';
+    if (!txt){ UI.toast('没有可复制的内容'); return; }
+    let copied = false;
+    try {
+      if (area.select) area.select();
+      if (navigator && navigator.clipboard) navigator.clipboard.writeText(txt);
+      copied = !!(document.execCommand && document.execCommand('copy'));
+    } catch(e){ copied = false; }
+    UI.toast(copied ? '📋 存档文本已复制' : '已全选，请按 Ctrl/Cmd + C 复制');
+  });
+  const impBtn = document.getElementById('btnImportSave');
+  if (impBtn) impBtn.addEventListener('click', ()=>{
+    const area = document.getElementById('saveText');
+    const res = importSaveText((area && area.value) || '');
+    UI.toast((res.ok?'✅ ':'❌ ') + res.reason);
+    log(`${res.ok?'✅':'❌'} 导入存档：${res.reason}`, res.ok?'good':'bad', 'sys');
+    if (!res.ok) return;
+    UI.sessionCoins = Game.coins;
+    UI.closeModal();
+    renderCurrent(); UI.refreshAll();
+  });
+  document.getElementById('modal').classList.remove('hidden');
+}
+window.openSaveIO = openSaveIO;
 
 // ---------- 初始化 ----------
 function init(){
