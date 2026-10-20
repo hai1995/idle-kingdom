@@ -69,6 +69,7 @@ function relevantLevel(it){
   if (it.weapon) return levelOf('attack');
   if (it.axePower) return levelOf('woodcutting');
   if (it.pickPower) return levelOf('mining');
+  if (it.rodPower) return levelOf('fishing');
   if (it.slot==='ring') return levelOf('attack');    // 指环按攻击等级
   if (it.slot==='amulet') return levelOf('defence'); // 护符按防御等级
   return levelOf('defence');
@@ -103,5 +104,22 @@ function unequip(slot, toBank){
   saveGame();
 }
 window.equipItem = equipItem; window.unequip = unequip;
+
+// ---------- 槽位锁定 ----------
+// 锁定的槽位不再被「自动装备 / 一键装备更优 / 自动购买工具」替换；手动装备与脱下仍可用。
+const GearSlotLabels = { axe:'斧头', pickaxe:'镐头', rod:'钓竿', weapon:'武器', bow:'弓', arrow:'箭矢',
+  helm:'头盔', body:'胸甲', legs:'腿甲', boots:'战靴', ring:'指环', amulet:'护符', healthPot:'治疗品' };
+function slotLocked(slot){ return !!(Game.lockSlots && Game.lockSlots[slot]); }
+function toggleSlotLock(slot){
+  if (!Game.lockSlots || typeof Game.lockSlots !== 'object') Game.lockSlots = {};
+  const locked = !Game.lockSlots[slot];
+  if (locked) Game.lockSlots[slot] = true; else delete Game.lockSlots[slot];
+  if (UI && UI.toast) UI.toast(locked ? `🔒 已锁定${GearSlotLabels[slot]||slot}槽位（自动更换会跳过）` : `🔓 已解锁${GearSlotLabels[slot]||slot}槽位`);
+  saveGame();
+  return locked;
+}
+window.GearSlotLabels = GearSlotLabels;
+window.slotLocked = slotLocked;
+window.toggleSlotLock = toggleSlotLock;
 
 // 生产累积（锻造批量停靠处理）

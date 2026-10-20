@@ -5,7 +5,7 @@ const Game = {
   banking: {},          // 物品数量 { itemId: qty }
   inventory: {},        // 背包 { itemId: qty }
   skills: {},           // { skillId: { level, xp } }
-  gear: { axe:null, pickaxe:null, weapon:null, bow:null, arrow:null, helm:null, body:null, legs:null, boots:null, ring:null, amulet:null, healthPot:null },
+  gear: { axe:null, pickaxe:null, rod:null, weapon:null, bow:null, arrow:null, helm:null, body:null, legs:null, boots:null, ring:null, amulet:null, healthPot:null },
   autoEatThreshold: 0.35,
   auto_equip: true,
   auto_buy_tools: false,
@@ -39,7 +39,7 @@ function cloneDefaultGame() {
   g.coins = 300; // 初始金币
   // 初始：短弓、青铜剑、治疗药水、一些箭、新手工具
   g.inventory = {
-    bronze_axe: 1, bronze_pick: 1, shortbow: 1, arrow_bronze: 20,
+    bronze_axe: 1, bronze_pick: 1, bronze_rod: 1, shortbow: 1, arrow_bronze: 20,
     health_pot: 3, raw_shrimp: 5, normal_log: 5,
     vial_water: 3, seed_guam: 2,
   };

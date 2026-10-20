@@ -367,6 +367,11 @@ const ShopStock = [
   { itemId:'mithril_pick',qty:1, cost:1300, lvl:30, cat:'tool' },
   { itemId:'adamant_pick',qty:1, cost:2800, lvl:40, cat:'tool' },
   { itemId:'runite_pick', qty:1, cost:6400, lvl:50, cat:'tool' },
+  { itemId:'iron_rod',   qty:1, cost:220,  lvl:15, cat:'tool', note:'钓鱼加速' },
+  { itemId:'steel_rod',  qty:1, cost:560,  lvl:20, cat:'tool' },
+  { itemId:'mithril_rod',qty:1, cost:1300, lvl:30, cat:'tool' },
+  { itemId:'adamant_rod',qty:1, cost:2800, lvl:40, cat:'tool' },
+  { itemId:'runite_rod', qty:1, cost:6400, lvl:50, cat:'tool' },
   // 弹药
   { itemId:'arrow_bronze',  qty:25, cost:160,  lvl:1,  cat:'ammo' },
   { itemId:'arrow_iron',    qty:25, cost:300,  lvl:15, cat:'ammo' },
@@ -412,5 +417,11 @@ addItem(
   I('mithril_pick','秘银镐','tool', { equip:true, size:3, pickPower:22, lvl:30, icon:'⛏️', value:1200 }),
   I('adamant_pick','精金镐','tool', { equip:true, size:3, pickPower:30, lvl:40, icon:'⛏️', value:2600 }),
   I('runite_pick','符文镐','tool', { equip:true, size:3, pickPower:40, lvl:50, icon:'⛏️', value:6000 }),
+  I('bronze_rod','青铜钓竿','tool', { equip:true, size:3, rodPower:4, lvl:1, slot:'rod', icon:'🎣' }),
+  I('iron_rod','铁钓竿','tool', { equip:true, size:3, rodPower:8, lvl:15, slot:'rod', icon:'🎣', value:200 }),
+  I('steel_rod','钢钓竿','tool', { equip:true, size:3, rodPower:15, lvl:20, slot:'rod', icon:'🎣', value:500 }),
+  I('mithril_rod','秘银钓竿','tool', { equip:true, size:3, rodPower:22, lvl:30, slot:'rod', icon:'🎣', value:1200 }),
+  I('adamant_rod','精金钓竿','tool', { equip:true, size:3, rodPower:30, lvl:40, slot:'rod', icon:'🎣', value:2600 }),
+  I('runite_rod','符文钓竿','tool', { equip:true, size:3, rodPower:40, lvl:50, slot:'rod', icon:'🎣', value:6000 }),
   I('health_pot','治疗药水','potion', { heal:150, value:40, consumable:true, equip:true, icon:'🧴' }),
 );

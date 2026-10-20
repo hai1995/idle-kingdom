@@ -906,4 +906,76 @@ try{
   console.error('FAIL: 移动端适配审计: '+e.message); console.error(e.stack); process.exitCode=1;
 }
 
+// ---- 22. 钓竿工具链 + 装备槽位锁定 ----
+try{
+  // 22a. 钓竿数据：独立槽位 / 按钓鱼等级判定 / 商店门槛文案
+  assert(!!ST.Items['bronze_rod'] && ST.Items['bronze_rod'].rodPower === 4, '钓竿物品存在并带威力值');
+  assert(G.equipSlotOf(ST.Items['iron_rod']) === 'rod', '钓竿装备到独立钓竿槽位 -> '+G.equipSlotOf(ST.Items['iron_rod']));
+  ST.Game.skills.fishing.level = 20;
+  assert(G.relevantLevel(ST.Items['steel_rod']) === 20, '钓竿按钓鱼等级判定 -> '+G.relevantLevel(ST.Items['steel_rod']));
+  assert(G.skillNameForShop('iron_rod') === '钓鱼', '商店把钓竿门槛标为钓鱼 -> '+G.skillNameForShop('iron_rod'));
+  assert(G.levelOfForShop('iron_rod') === ST.levelOf('fishing'), '商店钓竿等级取钓鱼等级');
+
+  // 22b. 初始背包带青铜钓竿，自动装备可穿上
+  G.resetToDefault();
+  ST.Game.auto_equip = true;
+  ST.Game.skills.fishing.level = 20;
+  G.maybeAutoEquip();
+  assert(ST.Game.gear.rod && ST.Game.gear.rod.id === 'bronze_rod', '自动装备青铜钓竿 -> '+(ST.Game.gear.rod&&ST.Game.gear.rod.name));
+
+  // 22c. 更好的钓竿能装备并缩短钓鱼间隔
+  const beforeInt = G.fishingInterval();
+  ST.giveItem('steel_rod', 1, false);
+  G.equipItem('steel_rod');
+  assert(ST.Game.gear.rod && ST.Game.gear.rod.id === 'steel_rod', '换上更强的钢钓竿 -> '+(ST.Game.gear.rod&&ST.Game.gear.rod.name));
+  const afterInt = G.fishingInterval();
+  assert(afterInt < beforeInt, '钓竿升级后钓鱼间隔缩短 -> '+beforeInt.toFixed(2)+'s → '+afterInt.toFixed(2)+'s');
+
+  // 22d. 商店出售多档钓竿，且单价 ≥ 回收价（杜绝低买高卖）
+  const rodShop = (ST.ShopStock||[]).filter(s=>ST.Items[s.itemId] && ST.Items[s.itemId].rodPower);
+  assert(rodShop.length >= 3, '商店出售多个等级的钓竿 -> '+rodShop.length+' 件');
+  const badRod = rodShop.filter(s=>Math.round(s.cost/s.qty) < (ST.Items[s.itemId].value||0));
+  assert(badRod.length === 0, '钓竿定价不倒挂（单价 ≥ 回收价）');
+
+  // 22e. 自动购买工具会购买并装备更好的钓竿
+  G.resetToDefault();
+  ST.Game.auto_buy_tools = true;
+  ST.Game.auto_equip = false;
+  ST.Game.coins = 700;
+  ST.Game.skills.fishing.level = 20;
+  G.autoBuyTools();
+  assert(ST.Game.gear.rod && ST.Game.gear.rod.id === 'steel_rod', '自动购买并装备更好的钓竿 -> '+(ST.Game.gear.rod&&ST.Game.gear.rod.name));
+
+  // 22f. 锁定槽位：自动装备 / 一键更优 / 自动购买都不替换，手动装备仍可用
+  ST.Game.auto_equip = true;
+  ST.Game.coins = 99999;
+  ST.Game.skills.fishing.level = 60;
+  ST.giveItem('runite_rod', 1, false);
+  G.toggleSlotLock('rod');
+  assert(ST.slotLocked('rod') === true, '槽位可锁定');
+  G.maybeAutoEquip(); G.equipAllBetter(); G.autoBuyTools();
+  assert(ST.Game.gear.rod.id === 'steel_rod', '锁定槽位不被自动更换 -> '+ST.Game.gear.rod.name);
+  G.equipItem('runite_rod');
+  assert(ST.Game.gear.rod.id === 'runite_rod', '手动装备仍可更换锁定槽位 -> '+ST.Game.gear.rod.name);
+  G.toggleSlotLock('rod');
+  assert(ST.slotLocked('rod') === false, '槽位可解锁');
+  ST.Game.gear.rod = ST.Items['bronze_rod'];
+  ST.giveItem('runite_rod', 1, false);
+  G.maybeAutoEquip();
+  assert(ST.Game.gear.rod.id === 'runite_rod', '解锁后自动装备恢复 -> '+ST.Game.gear.rod.name);
+
+  // 22g. 装备页渲染钓竿槽位与锁定按钮，且锁定状态写入存档
+  G.renderEquipment();
+  const eqHtml = context.document.getElementById('content').innerHTML;
+  assert(eqHtml.includes('钓竿') && eqHtml.includes('toggleSlotLock'), '装备页渲染钓竿槽位与锁定按钮');
+  G.toggleSlotLock('axe');
+  G.saveGame();
+  const saveRaw = JSON.parse(context.localStorage.getItem('melvor_idle_save_v1'));
+  assert(saveRaw && saveRaw.lockSlots && saveRaw.lockSlots.axe === true, '锁定状态写入存档');
+
+  console.log('PASS: 钓竿工具链与装备槽位锁定（装备/提速/购买/锁定隔离/存档）通过');
+}catch(e){
+  console.error('FAIL: 钓竿工具链与装备槽位锁定: '+e.message); console.error(e.stack); process.exitCode=1;
+}
+
 console.log('\n=== 引擎冒烟测试结束 ===');

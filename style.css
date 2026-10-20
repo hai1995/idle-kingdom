@@ -339,6 +339,9 @@ h3.sec.span{ grid-column:1/-1; margin-top:6px; }
 .eqslot .eqinfo{ flex:1; display:flex; flex-direction:column; min-width:0; }
 .eqslot .eqinfo .label{ color:var(--muted); font-size:11px; }
 .eqslot .eqinfo .val{ font-size:13px; font-weight:600; overflow:hidden; text-overflow:ellipsis; }
+.eqslot.locked{ border-color:#6d5a1f; box-shadow:inset 3px 0 0 var(--accent); }
+.mini.lock{ padding:2px 6px; opacity:.7; }
+.mini.lock.on{ opacity:1; border-color:var(--accent); }
 .muted{ color:var(--muted); }
 
 /* 农牧 */

@@ -391,6 +391,7 @@ function standbyHtml(){
     ['🏹', Game.gear.bow && Game.gear.bow.name],
     ['🪓', Game.gear.axe && Game.gear.axe.name],
     ['⛏️', Game.gear.pickaxe && Game.gear.pickaxe.name],
+    ['🎣', Game.gear.rod && Game.gear.rod.name],
     ['🪖', Game.gear.helm && Game.gear.helm.name],
     ['🦺', Game.gear.body && Game.gear.body.name],
   ].map(([ico,name])=>`<span class="gchip ${name?'':'off'}">${ico} ${name||'未装备'}</span>`).join('');
@@ -421,7 +422,7 @@ function standbyHtml(){
 function standbySignature(){
   const g = Game.gear;
   return [levelOf('combat'), autoAttack, g.weapon&&g.weapon.name, g.bow&&g.bow.name, g.axe&&g.axe.name,
-          g.pickaxe&&g.pickaxe.name, g.helm&&g.helm.name, g.body&&g.body.name, playerMaxHp(),
+          g.pickaxe&&g.pickaxe.name, g.rod&&g.rod.name, g.helm&&g.helm.name, g.body&&g.body.name, playerMaxHp(),
           playerDamageRange().hi, Math.floor(totalDefence())].join('|');
 }
 function bindStandby(){
@@ -769,6 +770,7 @@ function renderEquipment(){
   const slots = [
     ['axe','🪓','主手工具（斧）', Game.gear.axe],
     ['pickaxe','⛏️','副手工具（镐）', Game.gear.pickaxe],
+    ['rod','🎣','钓竿', Game.gear.rod],
     ['weapon','🗡️','武器', Game.gear.weapon],
     ['bow','🏹','弓', Game.gear.bow],
     ['arrow','➶','箭矢', Game.gear.arrow],
@@ -781,15 +783,18 @@ function renderEquipment(){
     ['healthPot','🧴','治疗品（自动吃）', Game.gear.healthPot],
   ];
   const rows = slots.map(([slot,ico,label,cur])=>{
+    const locked = slotLocked(slot);
+    const lockBtn = `<button class="mini tiny lock${locked?' on':''}" title="${locked?'解锁槽位':'锁定槽位：不再被自动更换'}" onclick="toggleSlotLock('${slot}');renderCurrent()">${locked?'🔒':'🔓'}</button>`;
     if (slot==='healthPot'){
       const curS = cur ? `${cur.name} (+${cur.heal})` : '未装备';
-      return `<div class="eqslot"><span class="ico">${ico}</span><span class="eqinfo"><span class="label">${label}</span><span class="val ${cur?'':'muted'}">${curS}</span></span></div>`;
+      return `<div class="eqslot${locked?' locked':''}"><span class="ico">${ico}</span><span class="eqinfo"><span class="label">${label}</span><span class="val ${cur?'':'muted'}">${curS}</span></span>${lockBtn}</div>`;
     }
     const valHtml = cur ? cur.name : '空';
-    return `<div class="eqslot">
+    return `<div class="eqslot${locked?' locked':''}">
       <span class="ico">${ico}</span>
       <span class="eqinfo"><span class="label">${label}</span><span class="val ${cur?'':'muted'}">${valHtml}</span></span>
       ${cur?`<button class="mini tiny" onclick="unequip('${slot}')">脱下</button>`:''}
+      ${lockBtn}
     </div>`;
   }).join('');
 
@@ -797,7 +802,7 @@ function renderEquipment(){
   const equipables = Object.entries(Game.inventory).filter(([id,qty])=>Items[id]&&Items[id].equip);
   const avail = equipables.map(([id,qty])=>{
     const it=Items[id];
-    const tag = it.axePower?'斧':it.pickPower?'镐':it.ranged?'弓':it.arrow?'箭':it.armor?'甲':it.slot==='ring'?'戒':it.slot==='amulet'?'符':'';
+    const tag = it.axePower?'斧':it.pickPower?'镐':it.rodPower?'竿':it.ranged?'弓':it.arrow?'箭':it.armor?'甲':it.slot==='ring'?'戒':it.slot==='amulet'?'符':'';
     const delta = gearDeltaHtml(it);
     const better = gearIsBetter(it);
     const cur = Game.gear[equipSlotOf(it)];
@@ -821,6 +826,7 @@ function renderEquipment(){
   el.innerHTML = `
     <div class="page">
       <h2>🛡️ 装备</h2>
+      <p class="hint">槽位右侧 🔒 可锁定该槽位：锁定后「自动装备 / 一键装备更优 / 自动购买工具」不会替换它，手动装备与脱下仍然可用。</p>
       <div class="gearbox">
         <div class="gear-stats">
           <div><span>⚔️ 伤害</span><b>${atk.lo}-${atk.hi}</b></div>
@@ -828,6 +834,7 @@ function renderEquipment(){
           <div><span>❤️ 生命</span><b>${playerMaxHp()}</b></div>
           <div><span>🪓 斧头威力</span><b>${Game.gear.axe?(Game.gear.axe.axePower||0):0}</b></div>
           <div><span>⛏️ 镐头威力</span><b>${Game.gear.pickaxe?(Game.gear.pickaxe.pickPower||0):0}</b></div>
+          <div><span>🎣 钓竿威力</span><b>${Game.gear.rod?(Game.gear.rod.rodPower||0):0}</b></div>
           <div><span>🏹 箭矢</span><b>${Game.gear.arrow?Game.gear.arrow.name:'未装备'}</b></div>
           <div><span>📿 经验加成</span><b>${amulet&&amulet.xpBonus?'+'+Math.round(amulet.xpBonus*100)+'%':'—'}</b></div>
           <div><span>🧪 药水</span><b>${Game.buff&&Potions[Game.buff.type]?Potions[Game.buff.type].name:'无'}</b></div>
@@ -836,7 +843,7 @@ function renderEquipment(){
       </div>
       <h3 class="sec">背包中的可装备物品</h3>
       <div class="sell-toolbar">
-        <span>可装备 <b>${equipables.length}</b> 种 · 已装备 <b>${Object.values(Game.gear).filter(Boolean).length}</b> / 12</span>
+        <span>可装备 <b>${equipables.length}</b> 种 · 已装备 <b>${Object.values(Game.gear).filter(Boolean).length}</b> / ${slots.length}</span>
         <button class="btn-mini" onclick="equipAllBetter();renderCurrent()">一键装备更优</button>
       </div>
       <div class="invgrid">${avail}</div>
@@ -846,7 +853,7 @@ function renderEquipment(){
 // 装备综合评分（用于比较强弱）
 function gearScore(it){
   if (!it) return -Infinity;
-  return (it.dmg||0)*3 + (it.def||0)*2 + (it.axePower||0)*2 + (it.pickPower||0)*2
+  return (it.dmg||0)*3 + (it.def||0)*2 + (it.axePower||0)*2 + (it.pickPower||0)*2 + (it.rodPower||0)*2
        + (it.heal||0)*0.2 + (it.xpBonus||0)*100;
 }
 // 是否比当前同槽位装备更优
@@ -858,7 +865,7 @@ function gearIsBetter(it){
 // 装备属性对比：与当前同槽位装备比较，输出带 Δ 的 HTML
 function gearDeltaHtml(it){
   const cur = Game.gear[equipSlotOf(it)];
-  const attrs = [['dmg','⚔️',1],['def','🛡️',1],['axePower','🪓',1],['pickPower','⛏️',1],['heal','❤️',1],['xpBonus','📿',100]];
+  const attrs = [['dmg','⚔️',1],['def','🛡️',1],['axePower','🪓',1],['pickPower','⛏️',1],['rodPower','🎣',1],['heal','❤️',1],['xpBonus','📿',100]];
   const parts = [];
   attrs.forEach(([k,ico,scale])=>{
     const a = (it[k]||0)*scale;
@@ -874,9 +881,10 @@ function gearDeltaHtml(it){
 }
 // 一键装备：把背包中每个槽位更优的装备穿上
 function equipAllBetter(){
-  const slots = ['axe','pickaxe','weapon','bow','arrow','helm','body','legs','boots','ring','amulet','healthPot'];
+  const slots = ['axe','pickaxe','rod','weapon','bow','arrow','helm','body','legs','boots','ring','amulet','healthPot'];
   let n = 0;
   for (const slot of slots){
+    if (slotLocked(slot)) continue;                 // 锁定槽位不参与自动更换
     let bestId = null, bestScore = -Infinity;
     for (const id in Game.inventory){
       const it = Items[id];
@@ -1050,6 +1058,7 @@ function levelOfForShop(itemId){
   if (!it) return 0;
   if (it.axePower) return levelOf('woodcutting');
   if (it.pickPower) return levelOf('mining');
+  if (it.rodPower) return levelOf('fishing');
   if (it.weapon && it.ranged) return levelOf('ranged');
   if (it.weapon) return levelOf('attack');
   if (it.armor) return levelOf('defence');
@@ -1064,6 +1073,7 @@ function skillNameForShop(itemId){
   if (!it) return '等级';
   if (it.axePower) return '伐木';
   if (it.pickPower) return '挖矿';
+  if (it.rodPower) return '钓鱼';
   if (it.weapon && it.ranged) return '远程';
   if (it.weapon) return '攻击';
   if (it.armor) return '防御';
@@ -1550,7 +1560,7 @@ function openSettings(){
     <label>自动进食阈值 ${Math.round(Game.autoEatThreshold*100)}%（低于此百分比自动吃，最近食物）：</label>
     <input type="range" id="eatRange" min="5" max="70" value="${Math.round(Game.autoEatThreshold*100)}">
     <label><input type="checkbox" id="autoEquipChk" ${Game.auto_equip?'checked':''}> 自动装备更好的武器/防具</label>
-    <label><input type="checkbox" id="autoBuyToolsChk" ${Game.auto_buy_tools?'checked':''}> 自动购买并装备更好的斧/镐（花金币）</label>
+    <label><input type="checkbox" id="autoBuyToolsChk" ${Game.auto_buy_tools?'checked':''}> 自动购买并装备更好的斧/镐/钓竿（花金币）</label>
     <label><input type="checkbox" id="autoAttackChk" ${autoAttack?'checked':''}> 自动持续战斗</label>
     <label><input type="checkbox" id="autoReviveChk" ${Game.auto_revive?'checked':''}> 战斗死亡后自动重开（满血重新挑战同一怪物）</label>
     <button class="btn-mini" onclick="UI.closeModal()">关闭</button>
@@ -1693,6 +1703,7 @@ function maybeAutoEquip(){
     const it = Items[bestId];
     if ((it.lvl||0) > levelOf(lvlSkill)) return;   // 等级不够则不穿
     const slot = equipSlotOf(it);
+    if (slotLocked(slot)) return;                  // 玩家锁定的槽位保持原样
     const cur = Game.gear[slot];
     const curScore = cur ? score(cur) : -Infinity;
     if (bestScore > curScore) equipItem(bestId);
@@ -1701,6 +1712,7 @@ function maybeAutoEquip(){
   consider(it=>it.weapon && it.ranged,  it=>it.dmg||0, 'ranged');                       // 弓
   consider(it=>it.axePower,             it=>it.axePower, 'woodcutting');                // 斧
   consider(it=>it.pickPower,            it=>it.pickPower, 'mining');                    // 镐
+  consider(it=>it.rodPower,             it=>it.rodPower,  'fishing');                   // 钓竿
   for (const part of ['helm','body','legs','boots'])
     consider(it=>it.armor && it.slot===part, it=>it.def||0, 'defence');                 // 防具
   consider(it=>it.slot==='ring',   it=>it.dmg||0, 'attack');                             // 指环

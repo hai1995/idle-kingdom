@@ -108,11 +108,18 @@ window.gatherSpeedMult = gatherSpeedMult;
 window.milestoneCount = milestoneCount;
 window.tickBuffs = tickBuffs;
 
-// 自动购买更好的工具（斧/镐）：满足等级且金币足够时，从商店买下一阶并装备
+// 自动购买更好的工具（斧 / 镐 / 钓竿）：满足等级且金币足够时，从商店买下一阶并装备
 function autoBuyTools(){
   if (!Game.auto_buy_tools) return;
   const shop = window.ShopStock || [];
-  const tryBuy = (kind, lvlSkill)=>{
+  // 工具类型 → [对应技能, 装备槽位]
+  const kinds = { axePower:['woodcutting','axe'], pickPower:['mining','pickaxe'], rodPower:['fishing','rod'] };
+  for (const attr in kinds){
+    const [lvlSkill, slot] = kinds[attr];
+    if (slotLocked(slot)) continue;                       // 锁定槽位不自动更换
+    tryBuy(attr, lvlSkill, slot);
+  }
+  function tryBuy(kind, lvlSkill, slot){
     const candidates = shop.filter(s=>{
       const it = Items[s.itemId];
       return it && it[kind] && levelOf(lvlSkill) >= it.lvl && Game.coins >= s.cost;
@@ -120,7 +127,6 @@ function autoBuyTools(){
     if (!candidates.length) return;
     const best = candidates[0];
     const bestIt = Items[best.itemId];
-    const slot = kind==='axePower' ? 'axe' : 'pickaxe';
     const cur = Game.gear[slot];
     const curPower = cur ? (cur[kind]||0) : 0;
     if ((bestIt[kind]||0) > curPower){
@@ -130,9 +136,7 @@ function autoBuyTools(){
       if (typeof equipItem === 'function') equipItem(best.itemId);
       saveGame();
     }
-  };
-  tryBuy('axePower', 'woodcutting');
-  tryBuy('pickPower', 'mining');
+  }
 }
 window.autoBuyTools = autoBuyTools;
 
@@ -506,7 +510,7 @@ function currentActionInterval(){
 }
 
 function fishingInterval(){
-  const power = Game.gear.rod ? (Game.gear.rod.power||0) : 0;
+  const power = Game.gear.rod ? (Game.gear.rod.rodPower||0) : 0;
   return Math.max(2.5, 4.5 - power*0.15 - levelOf('fishing')*0.02);
 }
 
