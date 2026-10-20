@@ -344,6 +344,15 @@ h3.sec.span{ grid-column:1/-1; margin-top:6px; }
 .mini.lock.on{ opacity:1; border-color:var(--accent); }
 .muted{ color:var(--muted); }
 
+/* 战斗风格切换 */
+.stylepick{ display:flex; flex-wrap:wrap; align-items:center; gap:8px; margin-bottom:10px; }
+.stylepick .sp-label{ color:var(--muted); font-size:12px; }
+.chip.sc{ background:var(--panel2); border:1px solid var(--border); color:var(--text);
+  border-radius:999px; padding:5px 12px; font-size:12px; cursor:pointer; transition:.15s; }
+.chip.sc:hover{ border-color:var(--accent); }
+.chip.sc.on{ border-color:var(--accent); color:var(--accent); box-shadow:0 0 0 1px var(--accent) inset; }
+.chip.sc.off{ opacity:.45; cursor:not-allowed; }
+
 /* 农牧 */
 .plots{ display:grid; grid-template-columns:repeat(auto-fit,minmax(min(215px,100%),1fr)); gap:12px; }
 .plot{

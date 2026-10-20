@@ -135,6 +135,14 @@ addItem(
   I('arrow_mithril','秘银箭','arrow', { value: 55, dmg: 6, equip:true, icon:'➶' }),
 );
 
+// ---- 法杖（魔法战斗使用；伤害走 damageRange，额外受魔法等级加成）----
+addItem(
+  I('staff_apprentice','学徒法杖','staff', { equip:true, weapon:true, magic:true, dmg:5,  lvl:1,  value:60,  icon:'🪄' }),
+  I('staff_adept','术士法杖','staff',  { equip:true, weapon:true, magic:true, dmg:13, lvl:15, value:150, icon:'🪄' }),
+  I('staff_mystic','秘法法杖','staff', { equip:true, weapon:true, magic:true, dmg:22, lvl:25, value:340, icon:'⚡' }),
+  I('staff_archmage','大法师法杖','staff',{ equip:true, weapon:true, magic:true, dmg:35, lvl:35, value:760, icon:'⚡' }),
+);
+
 // ---- 武器 / 防具 ----
 const weapons = {
   bronze_sword:  { base: '青铜剑',  dmg: 5,  lvl: 1,  mat_lvl: 1 },
@@ -218,6 +226,9 @@ R('fletch', 'longbow', 1, 18, 10, [['oak_log',1],['string',2]]);
 R('fletch', 'oak_bow', 1, 30, 20, [['willow_log',1],['string',2]]);
 R('fletch', 'willow_bow', 1, 55, 30, [['maple_log',1],['string',3]]);
 R('fletch', 'magic_bow', 1, 120, 45, [['magic_log',1],['string',4]]);
+// ---- 法杖（木料 + 符文 / 精华；魔法系的替代武器）
+R('fletch', 'staff_apprentice', 1, 25, 1,  [['normal_log',2],['essense',2]]);
+R('fletch', 'staff_adept',      1, 70, 15, [['oak_log',1],['water_rune',2],['string',1]]);
 // ---- 烹饪
 R('cook', 'shrimp', 1, 14, 1, [['raw_shrimp',1]]);
 R('cook', 'trout', 1, 30, 10, [['raw_trout',1]]);

@@ -1035,4 +1035,79 @@ try{
   console.error('FAIL: 后台节流与挂起补算: '+e.message); console.error(e.stack); process.exitCode=1;
 }
 
+// ---- 24. 法杖与魔法战斗风格 ----
+try{
+  G.resetToDefault();
+  // 24a. 法杖数据：独立槽位 + 按魔法等级判定
+  assert(!!ST.Items['staff_apprentice'] && ST.Items['staff_apprentice'].magic, '法杖物品存在并标记为魔法武器');
+  assert(G.equipSlotOf(ST.Items['staff_adept']) === 'magic', '法杖进入独立法杖槽位 -> '+G.equipSlotOf(ST.Items['staff_adept']));
+  ST.Game.skills.magic.level = 15;
+  assert(G.relevantLevel(ST.Items['staff_adept']) === 15, '法杖按魔法等级判定 -> '+G.relevantLevel(ST.Items['staff_adept']));
+  assert(G.skillNameForShop('staff_mystic') === '魔法', '等级提示文案为魔法 -> '+G.skillNameForShop('staff_mystic'));
+
+  // 24b. 法杖可被真正制作出来（配方类型接进 performAction）
+  const stRecipe = ST.Recipes.find(r=>r.out==='staff_apprentice');
+  ST.giveItem('normal_log', 4, false); ST.giveItem('essense', 4, false);
+  ST.Game.skills.magic.level = 1; ST.Game.skills.fletching.level = 5;
+  ST.Game.activity = { kind:'fletch', recipe:stRecipe, src:'test' };
+  G.performAction(ST.Game.activity);
+  assert(ST.totalOf('staff_apprentice') >= 1, '制作产出学徒法杖 -> '+ST.totalOf('staff_apprentice'));
+  ST.Game.activity = null;
+
+  // 24c. 手动与自动装备
+  G.equipItem('staff_apprentice');
+  assert(ST.Game.gear.magic && ST.Game.gear.magic.id === 'staff_apprentice', '法杖可手动装备 -> '+(ST.Game.gear.magic&&ST.Game.gear.magic.name));
+  assert(G.gearDeltaHtml(ST.Items['staff_apprentice']).includes('delta'), '法杖参与装备属性对比 Δ');
+  ST.giveItem('staff_adept', 1, false);
+  ST.Game.skills.magic.level = 15;
+  G.maybeAutoEquip();
+  assert(ST.Game.gear.magic.id === 'staff_adept', '满足条件时自动换上更强的法杖 -> '+ST.Game.gear.magic.name);
+
+  // 24d. 战斗风格偏好：优先玩家选择，不可用时自动回落
+  G.setCombatStyle('magic');
+  assert(G.combatMode() === 'magic', '手动选择魔法风格生效 -> '+G.combatMode());
+  const mdr = G.playerDamageRange();
+  assert(mdr.lo > 0 && mdr.hi >= mdr.lo, '魔法风格能算出伤害区间 -> '+mdr.lo+'-'+mdr.hi);
+  ST.Game.gear.magic = null;
+  ST.Game.gear.bow = null; ST.Game.gear.weapon = null;
+  assert(G.combatMode() === 'attack', '没有法杖时回落到近战 -> '+G.combatMode());
+  ST.giveItem('shortbow', 1, false); G.equipItem('shortbow');
+  ST.giveItem('arrow_bronze', 5, false); ST.Game.gear.arrow = ST.Items['arrow_bronze'];
+  G.setCombatStyle('auto');
+  assert(G.combatMode() === 'ranged', '未指定时按装备自动选择远程 -> '+G.combatMode());
+
+  // 24e. 魔法开战：不消耗箭矢，并积累魔法经验
+  ST.Game.gear.magic = ST.Items['staff_adept'];
+  G.setCombatStyle('magic');
+  ST.Game.skills.magic.xp = 0; ST.Game.skills.magic.level = 1;
+  const arrows0 = ST.totalOf('arrow_bronze');
+  G.startCombat('goblin');
+  assert(ST.Game.combat && ST.Game.combat.style === 'magic', '魔法偏好在开战时生效 -> '+(ST.Game.combat&&ST.Game.combat.style));
+  for (let i=0;i<40 && ST.Game.combat;i++) G.combatTick(0.3);
+  assert(ST.totalOf('arrow_bronze') === arrows0, '魔法战斗不消耗箭矢 -> '+ST.totalOf('arrow_bronze'));
+  assert(ST.Game.skills.magic.xp > 0, '魔法风格积累魔法经验 -> '+ST.Game.skills.magic.xp);
+
+  // 24f. 风格偏好写入并可读回存档
+  G.setCombatStyle('magic');
+  G.saveGame();
+  const raw2 = JSON.parse(context.localStorage.getItem('melvor_idle_save_v1'));
+  assert(raw2 && raw2.stylePref === 'magic', '风格偏好写入存档 -> '+(raw2&&raw2.stylePref));
+  context.localStorage.setItem('melvor_idle_save_v1', JSON.stringify(Object.assign({}, raw2, { stylePref:'ranged' })));
+  G.loadGame();
+  assert(ST.Game.stylePref === 'ranged', '读档恢复风格偏好 -> '+ST.Game.stylePref);
+
+  // 24g. 页面渲染：战斗页风格切换 + 装备页法杖槽位
+  G.setCombatStyle('auto');
+  G.renderCombat();
+  const cHtml = context.document.getElementById('content').innerHTML;
+  assert(cHtml.includes('data-style') && cHtml.includes('魔法'), '战斗页渲染风格切换按钮（含魔法）');
+  G.renderEquipment();
+  const eHtml = context.document.getElementById('content').innerHTML;
+  assert(eHtml.includes('法杖'), '装备页渲染法杖槽位');
+
+  console.log('PASS: 法杖与魔法战斗风格（装备/制作/切换/不耗箭矢/经验/存档/渲染）通过');
+}catch(e){
+  console.error('FAIL: 法杖与魔法战斗风格: '+e.message); console.error(e.stack); process.exitCode=1;
+}
+
 console.log('\n=== 引擎冒烟测试结束 ===');

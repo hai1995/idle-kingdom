@@ -350,10 +350,12 @@ function renderCombat(){
             <div>模式 <b>${styleInfo.icon}${styleInfo.name}</b></div>
             <div>🧪 药水 <span id="cStatBuff"><b>无</b></span></div>
           </div>
+          ${stylePickHtml()}
           <div id="fightArea" class="arena"></div>
           <div class="lootnotes">
             <p><b>💡 提示</b>点击右侧怪物即可开战，普通怪会自动连战；Boss 需要更高战斗等级，首杀还有额外奖励。</p>
             <p><b>💡 增益</b>药水在【背包】中「饮用」激活，给战斗或采集带来限时加成。</p>
+            <p><b>💡 风格</b>上方按钮可切换近战 / 远程 / 魔法（法杖由【技能·弓弩】制作），下一场战斗生效；没有对应武器会自动回落。</p>
           </div>
         </div>
         <div class="combat-right">
@@ -377,6 +379,10 @@ function renderCombat(){
     startCombat(b.dataset.fight);
     renderCurrent();
     UI.refreshActivity();
+  }));
+  document.querySelectorAll('[data-style]').forEach(b=>b.addEventListener('click', ()=>{
+    setCombatStyle(b.dataset.style);
+    renderCurrent();
   }));
   updateCombatLive();
 }
@@ -600,6 +606,22 @@ function combatStyleInfo(){
   if (style==='magic') return { icon:'✨', name:'魔法' };
   return { icon:'⚔️', name:'近战(剑类)' };
 }
+// 战斗风格切换（自动 / 近战 / 远程 / 魔法）：下一场战斗生效，没有对应武器时不可选
+function stylePickHtml(){
+  const cur = Game.stylePref || 'auto';
+  const opts = [
+    ['auto','🔀','自动', true],
+    ['attack','⚔️','近战', !!Game.gear.weapon],
+    ['ranged','🏹','远程', !!Game.gear.bow],
+    ['magic','✨','魔法', !!Game.gear.magic],
+  ];
+  const chips = opts.map(([id,ico,name,owned])=>{
+    const cls = `chip sc${cur===id?' on':''}${owned?'':' off'}`;
+    const tip = owned ? `下一场战斗使用${name}` : `还没装备${name}武器`;
+    return `<button class="${cls}" data-style="${id}" title="${tip}">${ico} ${name}</button>`;
+  }).join('');
+  return `<div class="stylepick"><span class="sp-label">战斗风格</span>${chips}</div>`;
+}
 function playerCanKill(m){
   const dmg = (playerDamageRange().lo+playerDamageRange().hi)/2;
   const hp = playerMaxHp();
@@ -774,6 +796,7 @@ function renderEquipment(){
     ['weapon','🗡️','武器', Game.gear.weapon],
     ['bow','🏹','弓', Game.gear.bow],
     ['arrow','➶','箭矢', Game.gear.arrow],
+    ['magic','✨','法杖（魔法）', Game.gear.magic],
     ['helm','🪖','头盔', Game.gear.helm],
     ['body','🦺','胸甲', Game.gear.body],
     ['legs','👖','腿甲', Game.gear.legs],
@@ -802,7 +825,7 @@ function renderEquipment(){
   const equipables = Object.entries(Game.inventory).filter(([id,qty])=>Items[id]&&Items[id].equip);
   const avail = equipables.map(([id,qty])=>{
     const it=Items[id];
-    const tag = it.axePower?'斧':it.pickPower?'镐':it.rodPower?'竿':it.ranged?'弓':it.arrow?'箭':it.armor?'甲':it.slot==='ring'?'戒':it.slot==='amulet'?'符':'';
+    const tag = it.axePower?'斧':it.pickPower?'镐':it.rodPower?'竿':it.magic?'杖':it.ranged?'弓':it.arrow?'箭':it.armor?'甲':it.slot==='ring'?'戒':it.slot==='amulet'?'符':'';
     const delta = gearDeltaHtml(it);
     const better = gearIsBetter(it);
     const cur = Game.gear[equipSlotOf(it)];
@@ -836,6 +859,7 @@ function renderEquipment(){
           <div><span>⛏️ 镐头威力</span><b>${Game.gear.pickaxe?(Game.gear.pickaxe.pickPower||0):0}</b></div>
           <div><span>🎣 钓竿威力</span><b>${Game.gear.rod?(Game.gear.rod.rodPower||0):0}</b></div>
           <div><span>🏹 箭矢</span><b>${Game.gear.arrow?Game.gear.arrow.name:'未装备'}</b></div>
+          <div><span>✨ 法杖</span><b>${Game.gear.magic?Game.gear.magic.name:'未装备'}</b></div>
           <div><span>📿 经验加成</span><b>${amulet&&amulet.xpBonus?'+'+Math.round(amulet.xpBonus*100)+'%':'—'}</b></div>
           <div><span>🧪 药水</span><b>${Game.buff&&Potions[Game.buff.type]?Potions[Game.buff.type].name:'无'}</b></div>
         </div>
@@ -881,7 +905,7 @@ function gearDeltaHtml(it){
 }
 // 一键装备：把背包中每个槽位更优的装备穿上
 function equipAllBetter(){
-  const slots = ['axe','pickaxe','rod','weapon','bow','arrow','helm','body','legs','boots','ring','amulet','healthPot'];
+  const slots = ['axe','pickaxe','rod','weapon','bow','magic','arrow','helm','body','legs','boots','ring','amulet','healthPot'];
   let n = 0;
   for (const slot of slots){
     if (slotLocked(slot)) continue;                 // 锁定槽位不参与自动更换
@@ -1060,6 +1084,7 @@ function levelOfForShop(itemId){
   if (it.pickPower) return levelOf('mining');
   if (it.rodPower) return levelOf('fishing');
   if (it.weapon && it.ranged) return levelOf('ranged');
+  if (it.weapon && it.magic) return levelOf('magic');
   if (it.weapon) return levelOf('attack');
   if (it.armor) return levelOf('defence');
   if (it.type==='seed') return levelOf('farming');
@@ -1075,6 +1100,7 @@ function skillNameForShop(itemId){
   if (it.pickPower) return '挖矿';
   if (it.rodPower) return '钓鱼';
   if (it.weapon && it.ranged) return '远程';
+  if (it.weapon && it.magic) return '魔法';
   if (it.weapon) return '攻击';
   if (it.armor) return '防御';
   if (it.type==='seed') return '农牧';
@@ -1716,8 +1742,9 @@ function maybeAutoEquip(){
     const curScore = cur ? score(cur) : -Infinity;
     if (bestScore > curScore) equipItem(bestId);
   };
-  consider(it=>it.weapon && !it.ranged, it=>it.dmg||0, 'attack');                       // 近战武器
-  consider(it=>it.weapon && it.ranged,  it=>it.dmg||0, 'ranged');                       // 弓
+  consider(it=>it.weapon && !it.ranged && !it.magic, it=>it.dmg||0, 'attack');   // 近战武器
+  consider(it=>it.weapon && it.ranged,  it=>it.dmg||0, 'ranged');                // 弓
+  consider(it=>it.weapon && it.magic,   it=>it.dmg||0, 'magic');                 // 法杖
   consider(it=>it.axePower,             it=>it.axePower, 'woodcutting');                // 斧
   consider(it=>it.pickPower,            it=>it.pickPower, 'mining');                    // 镐
   consider(it=>it.rodPower,             it=>it.rodPower,  'fishing');                   // 钓竿

@@ -66,6 +66,7 @@ function equipItem(itemId){
 }
 function relevantLevel(it){
   if (it.weapon && it.ranged) return levelOf('ranged');
+  if (it.weapon && it.magic) return levelOf('magic');
   if (it.weapon) return levelOf('attack');
   if (it.axePower) return levelOf('woodcutting');
   if (it.pickPower) return levelOf('mining');
@@ -76,6 +77,7 @@ function relevantLevel(it){
 }
 function requiredSkillName(it){
   if (it.weapon && it.ranged) return '远程';
+  if (it.weapon && it.magic) return '魔法';
   if (it.axePower) return '伐木';
   if (it.pickPower) return '挖矿';
   if (it.weapon) return '攻击';
@@ -88,6 +90,7 @@ function equipSlotOf(it){
   if (it.pickPower) return 'pickaxe';
   if (it.axePower) return 'axe';
   if (it.weapon && it.ranged) return 'bow';
+  if (it.weapon && it.magic) return 'magic';
   if (it.weapon) return 'weapon';
   if (it.type==='arrow') return 'arrow';
   if (it.type==='potion') return 'healthPot';

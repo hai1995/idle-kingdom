@@ -241,12 +241,39 @@ function monsterInterval(m){
   return Math.max(2.0, 3.2 - m.hp*0.002);
 }
 function combatMode(){
-  // 战斗风格由当前使用的攻击装备决定
+  // 战斗中进行风格固定；未战斗时按玩家偏好（不可用时自动回落）
   if (Game.combat) return Game.combat.style;
-  if (Game.gear.bow) return 'ranged';
-  if (Game.gear.magic) return 'magic';
+  return preferredStyle();
+}
+// 某种风格是否有对应武器（不校验弹药：箭矢耗尽由 startCombat 回退近战或拒绝开战）
+function styleAvailable(s){
+  if (s==='magic')  return !!Game.gear.magic;
+  if (s==='ranged') return !!Game.gear.bow;
+  if (s==='attack') return !!Game.gear.weapon;
+  return false;
+}
+const STYLE_NAMES = { auto:'自动', attack:'近战', ranged:'远程', magic:'魔法' };
+function styleLabel(v){ return STYLE_NAMES[v] || STYLE_NAMES.auto; }
+// 未战斗时的风格选择：玩家指定优先，否则按 远程 → 魔法 → 近战 回落
+function preferredStyle(){
+  const pref = Game.stylePref || 'auto';
+  if (pref !== 'auto' && styleAvailable(pref)) return pref;
+  if (styleAvailable('ranged')) return 'ranged';
+  if (styleAvailable('magic'))  return 'magic';
   return 'attack';
 }
+// 玩家在战斗页切换风格（下一场战斗生效）
+function setCombatStyle(v){
+  Game.stylePref = (v==='attack' || v==='ranged' || v==='magic') ? v : 'auto';
+  saveGame();
+  log(`🔀 战斗风格切换为 ${styleLabel(Game.stylePref)}（下一场生效）`, 'gold', 'sys');
+  UI && UI.toast(`战斗风格：${styleLabel(Game.stylePref)}`);
+  return Game.stylePref;
+}
+window.setCombatStyle = setCombatStyle;
+window.styleAvailable = styleAvailable;
+window.preferredStyle = preferredStyle;
+window.styleLabel = styleLabel;
 
 function playerWeaponDmg(){
   let dmg = 0;

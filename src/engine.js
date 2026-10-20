@@ -5,7 +5,8 @@ const Game = {
   banking: {},          // 物品数量 { itemId: qty }
   inventory: {},        // 背包 { itemId: qty }
   skills: {},           // { skillId: { level, xp } }
-  gear: { axe:null, pickaxe:null, rod:null, weapon:null, bow:null, arrow:null, helm:null, body:null, legs:null, boots:null, ring:null, amulet:null, healthPot:null },
+  gear: { axe:null, pickaxe:null, rod:null, weapon:null, bow:null, magic:null, arrow:null, helm:null, body:null, legs:null, boots:null, ring:null, amulet:null, healthPot:null },
+  stylePref: 'auto',    // 战斗风格偏好：'auto' | 'attack' | 'ranged' | 'magic'
   autoEatThreshold: 0.35,
   auto_equip: true,
   auto_buy_tools: false,
@@ -57,6 +58,7 @@ function cloneDefaultGame() {
   g.queueRunning = false;
   g.queueLoop = true;
   g.fallback = null;
+  g.stylePref = 'auto';
   g.skills = {
     woodcutting:{level:1,xp:0}, mining:{level:1,xp:0}, fishing:{level:1,xp:0},
     farming:{level:1,xp:0}, smithing:{level:1,xp:0}, crafting:{level:1,xp:0},
@@ -74,7 +76,8 @@ function saveGame() {
     stats:Game.stats, startedAt:Game.startedAt, autoEatThreshold:Game.autoEatThreshold,
     auto_equip:Game.auto_equip, auto_buy_tools:Game.auto_buy_tools, auto_revive:!!Game.auto_revive, shopBought:Game.shopBought, lockSlots:Game.lockSlots,
     recentLoot:Game.recentLoot||[], queue:Game.queue||[], queueIdx:Game.queueIdx||0, queueRound:Game.queueRound||0,
-    queueRunning:!!Game.queueRunning, queueLoop:Game.queueLoop!==false, fallback:Game.fallback||null };
+    queueRunning:!!Game.queueRunning, queueLoop:Game.queueLoop!==false, fallback:Game.fallback||null,
+    stylePref:Game.stylePref||'auto' };
   try { localStorage.setItem(SAVE_KEY, JSON.stringify(data)); }
   catch(e){ console.error('保存失败', e); }
   // 记录保存时间戳，用于计算离线时长
@@ -113,6 +116,7 @@ function loadGame() {
     Game.queueRunning = !!d.queueRunning;
     Game.queueLoop = d.queueLoop !== false;
     Game.fallback = (d.fallback && d.fallback.kind && d.fallback.target) ? d.fallback : null;
+    Game.stylePref = (d.stylePref==='attack'||d.stylePref==='ranged'||d.stylePref==='magic') ? d.stylePref : 'auto';
     // 首次读档：静默记录已解锁的里程碑，避免历史存档一次性弹出大量提示
     if (!Game.stats.seenMilestones || typeof Game.stats.seenMilestones !== 'object'){
       Game.stats.seenMilestones = {};
