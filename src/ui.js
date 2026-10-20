@@ -1637,16 +1637,13 @@ function activitySkill(a){
   return null;
 }
 
-function offlineProgress(){
+// 空档补算：离线读档 与 「标签页长时间挂起后回到前台」共用同一套规则
+function settleAway(seconds){
   const now = Date.now();
-  let last = null;
-  try { last = localStorage.getItem(SAVE_KEY+'_time'); } catch(e){}
-  try { localStorage.setItem(SAVE_KEY+'_time', String(now)); } catch(e){}
-  if (!last) return null;
-  const elapsed = Math.floor((now - parseInt(last))/1000);
-  if (!isFinite(elapsed) || elapsed < 60) return null;
-  const cap = 8*3600;                 // 离线收益最多结算 8 小时
-  const eff = Math.min(elapsed, cap);
+  if (!isFinite(seconds) || seconds < AWAY_MIN) return null;
+  try { localStorage.setItem(SAVE_KEY+'_time', String(now)); } catch(e){}   // 这段已结算，避免重进时被重复发放
+  const cap = 8*3600;                 // 补算收益最多 8 小时
+  const eff = Math.min(seconds, cap);
   // 作物离线继续生长并收获
   const cropsBefore = Game.stats.harvests||0;
   farmCatchUp(eff);
@@ -1680,6 +1677,17 @@ function offlineProgress(){
   saveGame();
   return Game.stats.lastOffline;
 }
+
+// 读档时的离线结算（拿 上次保存时间 → 现在 的空档补算）
+function offlineProgress(){
+  let last = null;
+  try { last = localStorage.getItem(SAVE_KEY+'_time'); } catch(e){}
+  try { localStorage.setItem(SAVE_KEY+'_time', String(Date.now())); } catch(e){}
+  if (!last) return null;
+  const elapsed = Math.floor((Date.now() - parseInt(last))/1000);
+  return settleAway(elapsed);
+}
+window.settleAway = settleAway;
 
 // 每间隔时间保存
 setInterval(saveGame, 20000);

@@ -978,4 +978,61 @@ try{
   console.error('FAIL: 钓竿工具链与装备槽位锁定: '+e.message); console.error(e.stack); process.exitCode=1;
 }
 
+// ---- 23. 后台节流 / 挂起不丢进度（稳定性回归） ----
+try{
+  const realNow = Date.now;
+  let clock = realNow();
+  Date.now = ()=>clock;                       // vm 上下文与宿主共享同一个 Date 对象
+  try{
+    G.resetToDefault();
+    G.startActivity('chop','normal_log');
+
+    // 23a. 后台标签页被限流到 1 秒一跳：游戏时间必须与真实流逝一致
+    const t0 = ST.Game.stats.time;
+    for (let i=0;i<10;i++){ clock += 1000; G.gameLoop(); }
+    const adv = ST.Game.stats.time - t0;
+    assert(adv === 10, '后台限流（1 秒一跳）不丢游戏时间 -> +'+adv+'s');
+
+    // 23b. 长时间无 tick（冻结 / 最小化）后回来：按补算规则结算而不是丢弃
+    const xp0 = ST.Game.skills.woodcutting.xp;
+    clock += 10*60*1000;
+    G.gameLoop();
+    assert(ST.Game.skills.woodcutting.xp > xp0, '长时间挂起后回来补算进度 -> +'+(ST.Game.skills.woodcutting.xp-xp0)+'xp');
+    assert(ST.Game.stats.lastOffline && ST.Game.stats.lastOffline.seconds >= 60, '空档写入补算摘要');
+
+    // 23c. 同一段空档不会被重复结算，回来后按帧继续推进
+    const sec = ST.Game.stats.lastOffline.seconds;
+    const tA = ST.Game.stats.time;
+    clock += 1000; G.gameLoop();
+    assert(ST.Game.stats.lastOffline.seconds === sec, '同一段空档不会重复结算');
+    assert(ST.Game.stats.time - tA === 1, '回到前台后按帧继续推进 -> +'+(ST.Game.stats.time-tA)+'s');
+
+    // 23d. 正常帧率（250ms）下与实际时间保持一致
+    const tB = ST.Game.stats.time;
+    for (let i=0;i<8;i++){ clock += 250; G.gameLoop(); }
+    assert(ST.Game.stats.time - tB === 2, '正常帧率下游戏时间与实际一致 -> +'+(ST.Game.stats.time-tB)+'s');
+
+    // 23e. 极长空档：一次性结算且不阻塞主线程
+    const w0 = realNow();
+    clock += 72*3600*1000;
+    G.gameLoop();
+    const cost = realNow() - w0;
+    assert(cost < 1000, '极长空档不会卡住主线程 -> '+cost+'ms');
+    assert(ST.Game.stats.lastOffline.seconds === 8*3600, '补算时长上限 8 小时 -> '+ST.Game.stats.lastOffline.time);
+
+    // 23f. 采集类活动的中等空档：回到前台后数帧内补齐，且不必打扰玩家
+    const prevOffline = ST.Game.stats.lastOffline.seconds;
+    const tC = ST.Game.stats.time;
+    clock += 40000; G.gameLoop();                       // 空档 40 秒
+    for (let i=0;i<4;i++){ clock += 250; G.gameLoop(); }
+    assert(ST.Game.stats.time - tC === 41, '中等空档在返回后补齐（40s + 4×250ms）-> +'+(ST.Game.stats.time-tC)+'s');
+    assert(ST.Game.stats.lastOffline.seconds === prevOffline, '未进入补算结算的空档不打扰玩家');
+  } finally {
+    Date.now = realNow;                       // 必须还原，否则后续用例时间冻结
+  }
+  console.log('PASS: 后台节流与挂起补算（不丢时间 / 不重复结算 / 不卡主线程）通过');
+}catch(e){
+  console.error('FAIL: 后台节流与挂起补算: '+e.message); console.error(e.stack); process.exitCode=1;
+}
+
 console.log('\n=== 引擎冒烟测试结束 ===');

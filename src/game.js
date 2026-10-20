@@ -463,12 +463,47 @@ function startCombat(monsterId){
 }
 
 // ---------- 主 tick ----------
+// 后台策略：浏览器会把后台标签页的定时器限流甚至冻结，
+// 因此「真实流逝的时间」不能丢——少量欠账在本帧逐步补算，长时间空档按离线规则一次性结算。
+const FRAME_STEP   = 0.6;  // 单步推进上限（秒）：保持战斗 / 动效节奏细腻
+const CATCHUP_MAX  = 3;    // 战斗中的单帧补算上限（秒）：避免一次性爆出大量打击动效
+const CATCHUP_IDLE = 60;   // 采集 / 制作等非战斗活动的单帧补算上限（秒）
+const AWAY_MIN     = 60;   // 空档超过这个秒数就按补算规则结算（与 offlineProgress 同阈值）
 let lastTick = Date.now();
+let pendingTime = 0;       // 待补算的时间（秒）
 function gameLoop(){
   const now = Date.now();
   let dt = (now - lastTick)/1000;
   lastTick = now;
-  dt = Math.min(dt, 0.6); // 单帧 tick 上限，防止卡顿时暴冲
+  if (!isFinite(dt) || dt < 0) dt = 0;      // 时钟回拨 / 首帧
+  pendingTime += dt;
+  // 本帧预算：正常帧只推一小步；被限流或挂起后则分批把欠账补上
+  // 战斗中的每补算秒会伴随打击飘字，因此上限更小；采集 / 制作可以更激进
+  const cap = Game.combat ? CATCHUP_MAX : CATCHUP_IDLE;
+  let budget = Math.min(pendingTime, cap);
+  let guard = 0;
+  while (budget > 0 && guard++ < 256){
+    const step = Math.min(FRAME_STEP, budget);
+    stepGame(step);
+    pendingTime -= step;
+    budget -= step;
+  }
+  // 仍有大额欠账 → 标签页曾被冻结 / 最小化，按离线规则结算，避免整段进度丢失
+  if (pendingTime >= AWAY_MIN){
+    const away = pendingTime;
+    pendingTime = 0;
+    if (typeof settleAway === 'function'){
+      const rec = settleAway(away);
+      if (rec && typeof UI !== 'undefined'){          // 补算可能有收获 / 经验，回来后立刻刷新
+        if (UI.refreshAll) UI.refreshAll();
+        if (typeof renderCurrent === 'function') renderCurrent();
+      }
+    }
+  }
+  if (UI && UI.tickProgress) UI.tickProgress();   // 状态栏动作进度条
+}
+// 单步推进若干秒（所有随时间推进的结算集中在此，后台补算直接复用）
+function stepGame(dt){
   if (Game.buff) tickBuffs(dt);   // 药水效果计时
   oneSecondAccum += dt;
   while (oneSecondAccum >= 1){
@@ -481,13 +516,13 @@ function gameLoop(){
   if (Game.activity && Game.activity.kind && Game.activity.kind !== 'combat'){
     activityProgress += dt;
     const interval = currentActionInterval();
-    while (activityProgress >= interval){
+    let spin = 0;
+    while (activityProgress >= interval && spin++ < 512){
       activityProgress -= interval;
       performAction(Game.activity);
     }
   }
   if (autoAttack && Game.combat) combatTick(dt);
-  if (UI && UI.tickProgress) UI.tickProgress();   // 状态栏动作进度条
 }
 let oneSecondAccum = 0, activityProgress = 0;
 function onSecond(){
