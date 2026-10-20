@@ -196,6 +196,10 @@ function processRecipe(recipe, count){
   gainXp(base.type==='cook' ? 'cooking' : mapRecipeSkill(base.type), base.xp*count);
   log(`✓ 制作 ${Items[base.out].name} ×${base.qty*count}`, 'good', 'skill');
   UI && UI.actionFeedback(mapRecipeSkill(base.type), Items[base.out].icon, base.qty*count);
+  // 锻造 / 打造装备：额外播放抡锤打铁演出（金属类用铁锤，弓弩/法杖用木槌）
+  if ((base.type === 'smith' || (base.type === 'fletch' && Items[base.out].equip)) && UI && UI.forgeShow){
+    UI.forgeShow(Items[base.out], { heavy: !!Items[base.out].equip, emoji: base.type==='smith' ? '🔨' : '🪵' });
+  }
   return true;
 }
 function mapRecipeSkill(type){

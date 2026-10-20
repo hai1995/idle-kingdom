@@ -106,7 +106,7 @@ assert(saved && saved.length>0, '存档写入 localStorage，长度='+(saved? sa
 loadJS('ui.js');
 // 增强 document stub 以支撑渲染用 querySelectorAll(具体选择器)
 const renderTargets = {};
-const mkTarget = ()=>({ innerHTML:'', dataset:{}, classList:{ add(){}, remove(){}, toggle(){} } });
+const mkTarget = ()=>({ innerHTML:'', dataset:{}, style:{}, classList:{ add(){}, remove(){}, toggle(){} } });
 ['content','skills','combat','bank','inventory','equipment','farming','stats','log','shop','queue','fightArea','modalBox'].forEach(t=>renderTargets[t]=mkTarget());
 context.document.getElementById = (id)=> renderTargets[id] || {
   textContent:'', innerHTML:'', classList:{add(){},remove(){},toggle(){}}, style:{}, appendChild(){},
@@ -1313,6 +1313,60 @@ try{
   console.log('PASS: 存档导出/导入（合法 JSON / 往返恢复 / 非法拒绝 / 入口渲染）通过');
 }catch(e){
   console.error('FAIL: 存档导出/导入: '+e.message); console.error(e.stack); process.exitCode=1;
+}
+
+// ---- 29. 打铁演出与动效强度 ----
+try{
+  G.resetToDefault();
+  // 29a. 无 DOM 环境（无头测试）时安全降级：不抛错也不阻塞逻辑
+  assert(ST.Game.fxLevel === 'full', '默认动效强度为完整 -> '+ST.Game.fxLevel);
+  assert(ST.UI.forgeShow(ST.Items['bronze_sword'], { heavy:true, emoji:'🔨' }) === false, '无 DOM 环境时打铁演出安全降级');
+  assert(ST.FX.forge(ST.Items['runite_sword']) === false, 'FX.forge 拿不到图层时返回 false');
+  assert(ST.FX.sparks(null, '#fff', 3) === undefined, 'FX.sparks 在元素缺失时安全返回');
+
+  // 29b. 三档强度：关闭 / 精简 / 完整
+  ST.Game.fxLevel = 'off';
+  assert(G.fxOff() === true && G.fxHeavy() === false, '关闭档判定正确');
+  assert(ST.UI.forgeShow(ST.Items['bronze_sword']) === false, '关闭档不播放演出');
+  ST.Game.fxLevel = 'light';
+  assert(G.fxOff() === false && G.fxHeavy() === false, '精简档判定正确');
+  assert(ST.UI.forgeShow(ST.Items['bronze_sword']) === false, '精简档不播放打铁演出（只飘字）');
+  ST.Game.fxLevel = 'full';
+  assert(G.fxHeavy() === true, '完整档判定正确');
+
+  // 29c. 演出只是附加：锻造产出照常
+  ST.Game.skills.smithing.level = 60;
+  const swordRecipe = ST.Recipes.find(r=>r.out==='iron_sword');
+  assert(swordRecipe && swordRecipe.type === 'smith', '剑类走 smith 配方 -> '+(swordRecipe&&swordRecipe.type));
+  (swordRecipe.cost||[]).forEach(([id,n])=>ST.giveItem(id, (n||1)*4, false));   // 备足原料
+  const swordBefore = ST.totalOf('iron_sword');
+  ST.Game.activity = { kind:'smith', recipe:swordRecipe, src:'test' };
+  G.performAction(ST.Game.activity);
+  assert(ST.totalOf('iron_sword') > swordBefore, '锻造仍然产出（演出不干扰逻辑） -> '+ST.totalOf('iron_sword'));
+  ST.Game.activity = null;
+
+  // 29d. 档位写入存档并在读档后恢复
+  ST.Game.fxLevel = 'light'; G.saveGame();
+  const rawFx = JSON.parse(context.localStorage.getItem('melvor_idle_save_v1'));
+  assert(rawFx.fxLevel === 'light', '动效档位写入存档 -> '+(rawFx&&rawFx.fxLevel));
+  context.localStorage.setItem('melvor_idle_save_v1', JSON.stringify(Object.assign({}, rawFx, { fxLevel:'off' })));
+  G.loadGame();
+  assert(ST.Game.fxLevel === 'off', '读档恢复动效档位 -> '+ST.Game.fxLevel);
+  ST.Game.fxLevel = 'full';
+
+  // 29e. 演出所需样式齐全，且尊重系统「减少动态效果」
+  const cssFx = fs.readFileSync(path.join(__dirname,'..','style.css'),'utf8');
+  ['.forge-stage','.forge-hammer','.forge-out','.fx-spark','@keyframes hammerSwing','@keyframes sparkFly','@keyframes shakeHard']
+    .forEach(sel=>assert(cssFx.includes(sel), `样式包含 ${sel}`));
+  assert(cssFx.includes('prefers-reduced-motion: reduce'), '尊重系统的「减少动态效果」设置');
+
+  // 29f. 设置里可切换
+  ST.UI.openSettings();
+  assert(context.document.getElementById('modalBox').innerHTML.includes('fxLevelSel'), '设置弹窗提供动效强度选项');
+
+  console.log('PASS: 打铁演出与动效强度（降级安全 / 三档 / 不干扰产出 / 存档 / 样式）通过');
+}catch(e){
+  console.error('FAIL: 打铁演出与动效强度: '+e.message); console.error(e.stack); process.exitCode=1;
 }
 
 console.log('\n=== 引擎冒烟测试结束 ===');

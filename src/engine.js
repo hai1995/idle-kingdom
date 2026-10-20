@@ -7,6 +7,7 @@ const Game = {
   skills: {},           // { skillId: { level, xp } }
   gear: { axe:null, pickaxe:null, rod:null, weapon:null, bow:null, magic:null, arrow:null, helm:null, body:null, legs:null, boots:null, ring:null, amulet:null, healthPot:null },
   stylePref: 'auto',    // 战斗风格偏好：'auto' | 'attack' | 'ranged' | 'magic'
+  fxLevel: 'full',      // 动效强度：'full' 完整演出 | 'light' 仅飘字 | 'off' 关闭
   autoEatThreshold: 0.35,
   auto_equip: true,
   auto_buy_tools: false,
@@ -59,6 +60,7 @@ function cloneDefaultGame() {
   g.queueLoop = true;
   g.fallback = null;
   g.stylePref = 'auto';
+  g.fxLevel = 'full';
   g.skills = {
     woodcutting:{level:1,xp:0}, mining:{level:1,xp:0}, fishing:{level:1,xp:0},
     farming:{level:1,xp:0}, smithing:{level:1,xp:0}, crafting:{level:1,xp:0},
@@ -77,7 +79,8 @@ function saveGame() {
     auto_equip:Game.auto_equip, auto_buy_tools:Game.auto_buy_tools, auto_revive:!!Game.auto_revive, shopBought:Game.shopBought, lockSlots:Game.lockSlots,
     recentLoot:Game.recentLoot||[], queue:Game.queue||[], queueIdx:Game.queueIdx||0, queueRound:Game.queueRound||0,
     queueRunning:!!Game.queueRunning, queueLoop:Game.queueLoop!==false, fallback:Game.fallback||null,
-    stylePref:Game.stylePref||'auto' };
+    stylePref:Game.stylePref||'auto',
+    fxLevel:(Game.fxLevel==='light'||Game.fxLevel==='off')?Game.fxLevel:'full' };
   try { localStorage.setItem(SAVE_KEY, JSON.stringify(data)); }
   catch(e){ console.error('保存失败', e); }
   // 记录保存时间戳，用于计算离线时长
@@ -117,6 +120,7 @@ function loadGame() {
     Game.queueLoop = d.queueLoop !== false;
     Game.fallback = (d.fallback && d.fallback.kind && d.fallback.target) ? d.fallback : null;
     Game.stylePref = (d.stylePref==='attack'||d.stylePref==='ranged'||d.stylePref==='magic') ? d.stylePref : 'auto';
+    Game.fxLevel   = (d.fxLevel==='light'||d.fxLevel==='off') ? d.fxLevel : 'full';
     // 首次读档：静默记录已解锁的里程碑，避免历史存档一次性弹出大量提示
     if (!Game.stats.seenMilestones || typeof Game.stats.seenMilestones !== 'object'){
       Game.stats.seenMilestones = {};

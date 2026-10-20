@@ -42,11 +42,34 @@ UI.attackFx = function(who){
     setTimeout(()=>def.classList.remove('slash'), 320);
   }
 };
-// 采集/制作完成：技能卡脉冲 + 物品飘字
+// 采集/制作完成：技能卡脉冲 + 物品飘字（+ 打击感：碎屑与卡片震动）
 UI.actionFeedback = function(skillId, icon, qty){
   UI.flashSkill(skillId);
   const card = document.querySelector(`[data-skill="${skillId}"]`);
-  FX.floatAtEl(card || document.getElementById('activityText'), `${icon} +${qty}`, '#ffd166');
+  const anchor = card || document.getElementById('activityText');
+  FX.floatAtEl(anchor, `${icon} +${qty}`, '#ffd166');
+  if (fxOff()) return;
+  if (['woodcutting','mining','fishing','smithing','runecrafting'].includes(skillId)){
+    FX.burstAtEl(card, icon, 4);              // 产出碎屑
+    FX.pop(card);
+  }
+  if (fxHeavy() && card) FX.shake(card);
+};
+// 动效强度档位（设置里可切换，写入存档）
+function fxOff(){ return (Game.fxLevel||'full') === 'off'; }
+function fxHeavy(){ return (Game.fxLevel||'full') === 'full'; }
+window.fxOff = fxOff; window.fxHeavy = fxHeavy;
+// ---------- 打铁演出：锻造 / 打造装备时播放 ----------
+UI.forgeShow = function(item, opts){
+  if (!item) return false;
+  if (fxOff()){ FX.floatAtEl(document.getElementById('activityText'), `${item.icon} ${item.name}`, '#ffd166'); return false; }
+  if (!fxHeavy()){
+    const el = document.querySelector(`[data-skill="smithing"]`) || document.getElementById('activityText');
+    FX.floatAtEl(el, `🔨 ${item.name}`, '#ffb347', true);
+    FX.burstAtEl(el, '✨', 5);
+    return false;
+  }
+  return FX.forge(item, opts);
 };
 // 金币变动飘字（顶栏）
 UI.coinFloat = function(n){
@@ -1665,6 +1688,13 @@ function openSettings(){
     <label><input type="checkbox" id="autoBuyToolsChk" ${Game.auto_buy_tools?'checked':''}> 自动购买并装备更好的斧/镐/钓竿（花金币）</label>
     <label><input type="checkbox" id="autoAttackChk" ${autoAttack?'checked':''}> 自动持续战斗</label>
     <label><input type="checkbox" id="autoReviveChk" ${Game.auto_revive?'checked':''}> 战斗死亡后自动重开（满血重新挑战同一怪物）</label>
+    <label>动效强度：
+      <select id="fxLevelSel">
+        <option value="full" ${(Game.fxLevel||'full')==='full'?'selected':''}>完整（打铁演出 / 火花 / 震动）</option>
+        <option value="light" ${Game.fxLevel==='light'?'selected':''}>精简（只保留飘字）</option>
+        <option value="off" ${Game.fxLevel==='off'?'selected':''}>关闭（无动画）</option>
+      </select>
+    </label>
     <button class="btn-mini" onclick="UI.closeModal()">关闭</button>
     <button class="btn-mini" onclick="saveGame();UI.toast('已保存')">保存</button>
   `;
@@ -1680,6 +1710,12 @@ function openSettings(){
   document.getElementById('autoBuyToolsChk').addEventListener('change', e=>{ Game.auto_buy_tools = e.target.checked; saveGame(); });
   document.getElementById('autoAttackChk').addEventListener('change', e=>{ autoAttack = e.target.checked; saveGame(); });
   document.getElementById('autoReviveChk').addEventListener('change', e=>{ Game.auto_revive = e.target.checked; saveGame(); UI.toast(e.target.checked?'已开启死亡自动重开':'已关闭死亡自动重开'); });
+  const fxSel = document.getElementById('fxLevelSel');
+  if (fxSel) fxSel.addEventListener('change', e=>{
+    Game.fxLevel = (e.target.value==='light'||e.target.value==='off') ? e.target.value : 'full';
+    saveGame();
+    UI.toast(`动效强度：${Game.fxLevel==='full'?'完整':Game.fxLevel==='light'?'精简':'关闭'}`);
+  });
   document.getElementById('modal').classList.remove('hidden');
 }
 UI.closeModal = function(){ document.getElementById('modal').classList.add('hidden'); };

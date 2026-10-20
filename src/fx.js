@@ -83,6 +83,96 @@ const FX = {
     setTimeout(()=>el.classList.remove('hitflash'), 320);
   },
 
+  // 火花（锻造用）：从锚点向上扇形喷出
+  sparks(el, color, count){
+    const layer = this.ensureLayer();
+    if (!layer) return;
+    let cx = (typeof window !== 'undefined' && window.innerWidth) ? window.innerWidth/2 : 0;
+    let cy = (typeof window !== 'undefined' && window.innerHeight) ? window.innerHeight/2 : 0;
+    if (el && typeof el.getBoundingClientRect === 'function'){
+      const r = el.getBoundingClientRect();
+      if (r.width || r.height){ cx = r.left + r.width/2; cy = r.top + r.height/2; }
+    }
+    const n = count || 10;
+    for (let i=0; i<n; i++){
+      const p = document.createElement('div');
+      p.className = 'fx-spark';
+      const a = -Math.PI/2 + (Math.random()-0.5)*Math.PI*1.1;   // 主要朝上
+      const dist = 40 + Math.random()*100;
+      p.style.left = cx + 'px';
+      p.style.top = cy + 'px';
+      p.style.setProperty('--dx', (Math.cos(a)*dist).toFixed(1) + 'px');
+      p.style.setProperty('--dy', (Math.sin(a)*dist).toFixed(1) + 'px');
+      if (color) p.style.background = color;
+      layer.appendChild(p);
+      setTimeout(()=>p.remove(), 700);
+    }
+  },
+
+  // ---------- 打铁演出：抡锤 → 火星四溅 → 成品亮相 ----------
+  // 只在具备 DOM 的环境播放；无头环境直接返回 false，逻辑层不受影响。
+  forge(item, opts){
+    if (this.forgeBusy) return false;                 // 连续锻造不叠加，避免刷屏
+    const layer = this.ensureLayer();
+    if (!layer) return false;
+    const o = opts || {};
+    const heavy = o.heavy !== false;
+    const color = (typeof rarityColor === 'function' && item) ? rarityColor(item) : '#ffd166';
+    const stage = document.createElement('div');
+    stage.className = 'forge-stage' + (heavy ? ' heavy' : '');
+    stage.style.setProperty('--r', color);
+    const name = item ? String(item.name) : '';
+    stage.innerHTML = `
+      <div class="forge-glow"></div>
+      <div class="forge-anvil">🛠️</div>
+      <div class="forge-billet"><span>🔥</span></div>
+      <div class="forge-hammer">${o.emoji || '🔨'}</div>
+      <div class="forge-out"><span class="out-ring"></span><span class="out-ico">${item ? item.icon : '📦'}</span><span class="out-name">${name}</span></div>`;
+    layer.appendChild(stage);
+    this.forgeBusy = true;
+
+    const hammer = stage.querySelector('.forge-hammer');
+    const strike = ()=>{
+      if (hammer && hammer.classList){
+        hammer.classList.remove('swing'); void hammer.offsetWidth; hammer.classList.add('swing');
+      }
+      setTimeout(()=>{
+        stage.classList.remove('impact'); void stage.offsetWidth; stage.classList.add('impact');
+        this.sparks(stage, color, heavy ? 12 : 8);
+        const app = document.getElementById && document.getElementById('app');
+        this.shakeHard(app);
+      }, 170);
+    };
+    const strikes = heavy ? 3 : 1;
+    let i = 0;
+    strike();
+    const timer = setInterval(()=>{
+      if (++i >= strikes){ clearInterval(timer); reveal(); return; }
+      strike();
+    }, 430);
+
+    const self = this;
+    function reveal(){
+      setTimeout(()=>{
+        stage.classList.add('done');
+        const out = stage.querySelector('.forge-out');
+        if (out) out.classList.add('show');
+        if (heavy) self.sparks(stage, color, 16);
+      }, 240);
+      setTimeout(()=>{ stage.remove(); self.forgeBusy = false; }, 1150);
+    }
+    return true;
+  },
+
+  // 强震动（打铁命中 / 暴击）：比 .shake 幅度更大
+  shakeHard(el){
+    if (!el || !el.classList) return;
+    el.classList.remove('shake-hard');
+    void el.offsetWidth;
+    el.classList.add('shake-hard');
+    setTimeout(()=>el.classList.remove('shake-hard'), 320);
+  },
+
   // 弹跳（获得物品/升级）
   pop(el){
     if (!el || !el.classList) return;
