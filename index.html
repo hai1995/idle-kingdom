@@ -1,0 +1,69 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>放置王国 · Idle Kingdom</title>
+<link rel="icon" href="data:image/svg+xml,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 100 100'><text y='.9em' font-size='90'>🏰</text></svg>">
+<link rel="stylesheet" href="style.css">
+</head>
+<body onload="init()">
+<div id="app">
+
+  <!-- 顶栏 -->
+  <header id="topbar">
+    <div class="left">
+      <span id="playerName" class="title">冒险者</span>
+      <span class="level lv-combat">战斗 Lv <b id="combatLevel">1</b></span>
+      <span class="level lv-total">总 Lv <b id="totalLevel">16</b></span>
+      <span class="gold">💰 <b id="money">0</b></span>
+    </div>
+    <div class="right">
+      <button id="btnSettings" class="icon-btn" title="设置">⚙️</button>
+      <button id="btnSave" class="btn-mini">存档</button>
+    </div>
+  </header>
+
+  <!-- 导航 -->
+  <nav id="tabs">
+    <button class="tab active" data-tab="skills">技能</button>
+    <button class="tab" data-tab="combat">战斗</button>
+    <button class="tab" data-tab="bank">仓库</button>
+    <button class="tab" data-tab="inventory">背包</button>
+    <button class="tab" data-tab="equipment">装备</button>
+    <button class="tab" data-tab="shop">商店</button>
+    <button class="tab" data-tab="queue">行动</button>
+    <button class="tab" data-tab="farming">农牧</button>
+    <button class="tab" data-tab="stats">统计</button>
+    <button class="tab" data-tab="log">日志</button>
+  </nav>
+
+  <!-- 主内容区域 -->
+  <main id="content">
+    <!-- 各页由 JS 渲染 -->
+  </main>
+
+  <!-- 底部状态条 -->
+  <footer id="statusbar">
+    <span id="hpDisplay">❤️ <b>0</b>/0</span>
+    <span id="buffDisplay" class="buff"></span>
+    <div id="actionProg" class="hidden"><div id="actionProgFill"></div></div>
+    <span id="activityText">状态：空闲</span>
+    <button id="btnStop" class="btn-mini">停止</button>
+  </footer>
+
+</div>
+
+<!-- 浮动提示层 -->
+<div id="toasts"></div>
+<div id="modal" class="hidden"><div id="modalBox"></div></div>
+
+<script src="src/gameData.js"></script>
+<script src="src/engine.js"></script>
+<script src="src/game.js"></script>
+<script src="src/queue.js"></script>
+<script src="src/interact.js"></script>
+<script src="src/fx.js"></script>
+<script src="src/ui.js"></script>
+</body>
+</html>
