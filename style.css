@@ -161,6 +161,7 @@ h3.sec.span{ grid-column:1/-1; margin-top:6px; }
 .sk-name{ font-size:16px; font-weight:600; flex:1; }
 .sk-lvl{ color:var(--accent); font-weight:700; }
 .sk-xp{ color:var(--muted); font-size:12px; }
+.sk-eta{ margin-left:auto; font-size:11px; color:var(--muted); white-space:nowrap; }
 .sk-bar{ height:10px; background:#0c111a; border:1px solid var(--border); border-radius:5px; margin:8px 0; overflow:hidden; }
 .sk-fill{ height:100%; border-radius:4px; transition:width .3s; }
 
@@ -364,6 +365,11 @@ h3.sec.span{ grid-column:1/-1; margin-top:6px; }
 /* 日志 */
 .loglist{ display:flex; flex-direction:column; gap:4px; max-height:70vh; overflow-y:auto; }
 .logitem{ padding:5px 8px; border-radius:5px; font-size:12px; background:var(--panel); font-family:Consolas,monospace; }
+.logbar{ display:flex; justify-content:space-between; align-items:center; gap:8px; margin:8px 0 10px; flex-wrap:wrap; }
+.logchips{ display:flex; flex-wrap:wrap; gap:6px; }
+.logchip{ font-size:12px; background:var(--panel2); border:1px solid var(--border); border-radius:20px; padding:4px 12px; color:var(--text); cursor:pointer; }
+.logchip:hover{ border-color:var(--accent); }
+.logchip.active{ background:var(--accent); border-color:var(--accent); color:#1a2138; font-weight:600; }
 
 /* 状态栏 */
 #statusbar{

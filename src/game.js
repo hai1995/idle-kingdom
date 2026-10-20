@@ -27,7 +27,7 @@ function checkMilestoneToast(){
     if (unlocked[ms.id] && !seen[ms.id]){
       seen[ms.id] = true;
       newly++;
-      log(`🏅 里程碑解锁：${ms.name} —— ${ms.bonus}`, 'gold');
+      log(`🏅 里程碑解锁：${ms.name} —— ${ms.bonus}`, 'gold', 'sys');
       UI && UI.toast(`🏅 ${ms.name}\n${ms.bonus}`);
     }
   });
@@ -78,7 +78,7 @@ function tickBuffs(dt){
   Game.buff.remaining -= dt;
   if (Game.buff.remaining <= 0) {
     const def = Potions[Game.buff.type];
-    log(`⌛ 药水效果 ${def?def.name:Game.buff.type} 已结束。`, 'gold');
+    log(`⌛ 药水效果 ${def?def.name:Game.buff.type} 已结束。`, 'gold', 'sys');
     Game.buff = null;
   }
 }
@@ -93,7 +93,7 @@ function drinkPotion(itemId){
   Game.stats.potions++;
   Game.buff = { type:itemId, kind:def.kind, remaining:def.dur, dur:def.dur };
   saveGame();
-  log(`🧪 饮用了 ${def.name}：${def.desc}`, 'herblore');
+  log(`🧪 饮用了 ${def.name}：${def.desc}`, 'herblore', 'sys');
   UI && UI.floatText(playerEl(), `🧪 ${def.name}`, '#80e0a5');
   UI && UI.toast(`药水生效！${def.name}`);
   return true;
@@ -126,7 +126,7 @@ function autoBuyTools(){
     if ((bestIt[kind]||0) > curPower){
       Game.coins -= best.cost;
       giveItem(best.itemId, 1, false);
-      log(`🛒 自动购买并装备 ${bestIt.name}`, 'gold');
+      log(`🛒 自动购买并装备 ${bestIt.name}`, 'gold', 'trade');
       if (typeof equipItem === 'function') equipItem(best.itemId);
       saveGame();
     }
@@ -168,7 +168,7 @@ function farmTick(elapsed){
       Game.stats.harvests = (Game.stats.harvests||0) + 1;
       gainXp('farming', (Items[seed.crop].xp||10));
       if (chance(0.25)) giveItem(f.seedId, 1, false); // 返还种子
-      log(`🌾 农地${slotIdNum(slot)} 收获了 ${Items[seed.crop].name}！`, 'farming');
+      log(`🌾 农地${slotIdNum(slot)} 收获了 ${Items[seed.crop].name}！`, 'farming', 'skill');
       UI && UI.cropGrown(slot, Items[seed.crop]);
       delete Game.farms[slot];
       grew.push(slot);
@@ -190,7 +190,7 @@ function processRecipe(recipe, count){
   payCost(scaleCost(base.cost, count));
   giveItem(base.out, base.qty*count, false); // 加工产物进背包
   gainXp(base.type==='cook' ? 'cooking' : mapRecipeSkill(base.type), base.xp*count);
-  log(`✓ 制作 ${Items[base.out].name} ×${base.qty*count}`, 'good');
+  log(`✓ 制作 ${Items[base.out].name} ×${base.qty*count}`, 'good', 'skill');
   UI && UI.actionFeedback(mapRecipeSkill(base.type), Items[base.out].icon, base.qty*count);
   return true;
 }
@@ -287,7 +287,7 @@ function doPlayerAttack(c, m){
     if (!arrow || (Game.inventory[arrow.id]||0) <= 0){
       if (Game.gear.weapon){
         c.style = 'attack';
-        log('🏹 箭矢耗尽，自动切换为近战', 'bad');
+        log('🏹 箭矢耗尽，自动切换为近战', 'bad', 'combat');
       } else {
         Game.combat = null; autoAttack = false;
         UI && UI.toast('箭矢耗尽，无法继续战斗');
@@ -365,7 +365,7 @@ function meetKill(c,m){
   Game.stats.kills++;
   if (isBoss){
     Game.stats.bossKills++;
-    UI && UI.log(`🏆 击败 Boss：${m.name}！`, 'gold');
+    UI && UI.log(`🏆 击败 Boss：${m.name}！`, 'gold', 'combat');
     UI && UI.bossKillFx(m);
     if (m.coins){ Game.coins += m.coins; Game.stats.totalEarned += m.coins; }
     // 首杀奖励
@@ -375,7 +375,7 @@ function meetKill(c,m){
       const fr = m.firstReward;
       if (fr.coins){ Game.coins += fr.coins; Game.stats.totalEarned += fr.coins; }
       if (fr.ring && Items[fr.ring]) giveItem(fr.ring, 1, false);
-      UI && UI.log(`🌟 首杀 ${m.name}：额外 +${fr.coins} 金币${fr.ring?' + '+Items[fr.ring].name:''}！`, 'gold');
+      UI && UI.log(`🌟 首杀 ${m.name}：额外 +${fr.coins} 金币${fr.ring?' + '+Items[fr.ring].name:''}！`, 'gold', 'combat');
     }
   }
   gainXp('combat', m.xp);
@@ -385,7 +385,7 @@ function meetKill(c,m){
       const n = roll(Math.max(1,qty), qty*3);
       giveItem(id, n, false);
       pushRecentLoot(id, n);
-      UI && UI.log(`⚔️ 战利品: ${Items[id].name} ×${n}`, 'gold');
+      UI && UI.log(`⚔️ 战利品: ${Items[id].name} ×${n}`, 'gold', 'combat');
       UI && UI.lootFloat(id, n);
     }
   });
@@ -406,7 +406,7 @@ window.pushRecentLoot = pushRecentLoot;
 
 function onPlayerDeath(c,m){
   Game.stats.deaths++;
-  log(`💀 你被 ${m.name} 击败了！`, 'bad');
+  log(`💀 你被 ${m.name} 击败了！`, 'bad', 'combat');
   UI && UI.deathFloat();
   Game.combat = null;
   autoAttack = false;
@@ -534,7 +534,7 @@ function doChop(a){
   // 特殊：若干情况下额外收益
   if (chance(0.03 + levelOf('woodcutting')*0.0005)){
     giveItem('string', 1, false);
-    UI && UI.log('🪵 你发现了一些细绳！', 'crafting');
+    UI && UI.log('🪵 你发现了一些细绳！', 'crafting', 'skill');
   }
 }
 function doMine(a){
@@ -557,7 +557,7 @@ function doActionDrop(item, skillId, mult){
   const qty = chance(0.25) ? 2 : 1;
   giveItem(item.id, qty, false);
   gainXp(skillId, item.xp * qty * mult);
-  UI && UI.log(`${actionIcon(skillId)} 获得 ${item.name} ×${qty}`, skillId);
+  UI && UI.log(`${actionIcon(skillId)} 获得 ${item.name} ×${qty}`, skillId, 'skill');
   UI && UI.actionFeedback(skillId, item.icon, qty);
 }
 function doRecipeAction(a){

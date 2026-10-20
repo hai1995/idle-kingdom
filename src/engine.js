@@ -234,8 +234,8 @@ function payCost(cost){
 }
 
 // ---------- 完成时是否全满经验 ----------
-function log(msg, color){
-  if (UI && UI.log) UI.log(msg, color);
+function log(msg, color, cat){
+  if (UI && UI.log) UI.log(msg, color, cat);
 }
 
 // 通过模块导出（浏览器全局挂到 window）

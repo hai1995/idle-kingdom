@@ -15,6 +15,7 @@ const document = {
   querySelector: () => null,
   querySelectorAll: () => [],
   createElement: () => ({ className:'', textContent:'', style:{}, remove(){}, }),
+  addEventListener(){},   // 键盘导航等 document 级监听
 };
 const UIstub = {
   log(){}, toast(){}, floatText(){}, levelUp(){}, flashSkill(){},

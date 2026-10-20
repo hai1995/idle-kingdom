@@ -1,5 +1,5 @@
 // ===== 渲染 & 界面逻辑 =====
-const UI = { currentTab: 'skills', logs: [] };
+const UI = { currentTab: 'skills', logs: [], logFilter: 'all' };
 
 // ===== 工具 =====
 function esc(s){
@@ -9,8 +9,8 @@ function fmt(n){ return n >= 1000000 ? (n/1000000).toFixed(2)+'M' : n >= 10000 ?
 function skillColor(skill){ return { woodcutting:'#58b368', mining:'#a5713f', fishing:'#4fa3c7', farming:'#6fbf4e', smithing:'#e07b39', crafting:'#c58fd6', fletching:'#b58a4a', cooking:'#e9a23b', runecrafting:'#9463d1', herblore:'#80e0a5', combat:'#d1495b', attack:'#e63946', strength:'#f9844a', defence:'#4895ef', ranged:'#43aa8b', magic:'#9b5de5' }[skill] || '#888'; }
 
 // ---------- 日志 ----------
-UI.log = function(msg, color){
-  const entry = { msg, color: skillColor(color)||color, t: new Date() };
+UI.log = function(msg, color, cat){
+  const entry = { msg, color: skillColor(color)||color, t: new Date(), cat: cat || 'sys' };
   UI.logs.unshift(entry);
   UI.logs = UI.logs.slice(0, 200);
   if (UI.currentTab==='log') UI.renderLog();
@@ -93,7 +93,7 @@ UI.tickProgress = function(){
 };
 UI.levelUp = function(skillId, oldLevel, newLevel, xp){
   const name = Skills[skillId].name;
-  UI.log(`🎉 ${name} 升到 ${newLevel} 级！`, skillId);
+  UI.log(`🎉 ${name} 升到 ${newLevel} 级！`, skillId, 'skill');
   UI.toast(`${name} → Lv ${newLevel}`);
   UI.flashSkill(skillId);
   FX.burstAtEl(document.querySelector(`[data-skill="${skillId}"]`), '✨', 6);
@@ -109,6 +109,19 @@ function bindTabs(){
       UI.currentTab = btn.dataset.tab;
       renderCurrent();
     });
+  });
+}
+// 键盘导航：数字键 1-9/0 快速切换页签（输入框聚焦或弹窗打开时禁用）
+function bindKeyboardNav(){
+  const tabs = Array.from(document.querySelectorAll('#tabs .tab'));
+  document.addEventListener('keydown', (e)=>{
+    const t = e.target;
+    if (t && (t.tagName==='INPUT' || t.tagName==='SELECT' || t.tagName==='TEXTAREA' || t.isContentEditable)) return;
+    const modal = document.getElementById('modal');
+    if (modal && modal.classList && !modal.classList.contains('hidden')) return;
+    const n = parseInt(e.key, 10);
+    const idx = e.key==='0' ? 9 : n-1;
+    if (idx>=0 && idx<tabs.length) tabs[idx].click();
   });
 }
 function renderCurrent(){
@@ -184,6 +197,7 @@ function skillBlock(skillId){
       <span class="sk-name">${s.name}</span>
       <span class="sk-lvl">Lv ${g.level}</span>
       <span class="sk-xp" title="累计经验 ${fmt(g.xp)}">${skillXpText(g)}</span>
+      <span class="sk-eta"></span>
     </div>
     <div class="sk-bar"><div class="sk-fill" style="width:${pct.toFixed(1)}%;background:linear-gradient(90deg,${skillColor(skillId)}88,${skillColor(skillId)})"></div></div>
     ${optionHtml}
@@ -203,6 +217,37 @@ function skillXpText(g){
   const next = xpForLevel(g.level+1);
   return `${fmt(Math.max(0, g.xp-base))} / ${fmt(next-base)}`;
 }
+// 经验速率采样（平滑），用于「预计升级时间」
+function sampleXpRates(){
+  if (!UI.xpTrack) UI.xpTrack = {};
+  const now = Date.now();
+  for (const sid of Object.keys(Game.skills)){
+    const g = Game.skills[sid];
+    let tr = UI.xpTrack[sid];
+    if (!tr){ UI.xpTrack[sid] = { xp:g.xp, t:now, rate:0 }; continue; }
+    const dt = (now - tr.t)/1000;
+    if (dt >= 1){
+      const inst = Math.max(0, (g.xp - tr.xp)/dt);
+      tr.rate = tr.rate*0.6 + inst*0.4;
+      tr.xp = g.xp; tr.t = now;
+    }
+  }
+}
+function fmtEta(sec){
+  if (sec < 60) return Math.ceil(sec)+' 秒';
+  if (sec < 3600) return Math.floor(sec/60)+' 分';
+  return Math.floor(sec/3600)+' 时 ' + Math.floor(sec%3600/60)+' 分';
+}
+function skillEtaText(skillId){
+  const g = Game.skills[skillId];
+  const tr = UI.xpTrack && UI.xpTrack[skillId];
+  if (!g || !tr || tr.rate <= 0) return '';
+  const need = xpForLevel(g.level+1) - g.xp;
+  if (need <= 0) return '';
+  const sec = need / tr.rate;
+  if (sec > 86400) return '';
+  return `⏱ 约${fmtEta(sec)}后升级`;
+}
 // 轻量更新技能页进度（不重建 DOM，避免丢失悬停/焦点）
 function updateSkillsLive(){
   document.querySelectorAll('.skillcard').forEach(card=>{
@@ -215,6 +260,8 @@ function updateSkillsLive(){
     if (xpEl) xpEl.textContent = skillXpText(g);
     const lvlEl = card.querySelector('.sk-lvl');
     if (lvlEl) lvlEl.textContent = `Lv ${g.level}`;
+    const etaEl = card.querySelector('.sk-eta');
+    if (etaEl) etaEl.textContent = skillEtaText(skillId);
     // 已解锁的加工配方若没显示，标记当前活动为选中态（仅视觉）
   });
 }
@@ -786,7 +833,7 @@ function equipAllBetter(){
   }
   if (n){
     saveGame();
-    UI.log(`🛡️ 一键装备：换上 ${n} 件更优装备`, 'good');
+    UI.log(`🛡️ 一键装备：换上 ${n} 件更优装备`, 'good', 'trade');
     UI.toast(`🛡️ 换上 ${n} 件更优装备`);
   } else {
     UI.toast('当前已是最佳装备');
@@ -945,7 +992,7 @@ function buyItem(itemId, cost, qty, reqLvl){
   saveGame();
   UI.coinFloat(-cost);
   UI.toast(`已购买 ${it.name} ×${qty}`);
-  log(`🛒 购买 ${it.name} ×${qty}，花费 ${cost} 金币`, 'gold');
+  log(`🛒 购买 ${it.name} ×${qty}，花费 ${cost} 金币`, 'gold', 'trade');
 }
 function sellAll(itemId){
   const qty = Game.inventory[itemId]||0;
@@ -959,7 +1006,7 @@ function sellAll(itemId){
   delete Game.inventory[itemId];
   saveGame();
   UI.coinFloat(gain);
-  log(`💰 出售 ${it.name} ×${qty}，获得 ${gain} 金币`, 'gold');
+  log(`💰 出售 ${it.name} ×${qty}，获得 ${gain} 金币`, 'gold', 'trade');
 }
 // 一键出售：卖出背包中全部可回收物品
 function sellAllJunk(){
@@ -977,7 +1024,7 @@ function sellAllJunk(){
   saveGame();
   UI.coinFloat(gain);
   UI.toast(`💰 一键出售 ${cands.length} 种物品，获得 ${fmt(gain)} 金币`);
-  log(`💰 一键出售 ${cands.length} 种物品，获得 ${gain} 金币`, 'gold');
+  log(`💰 一键出售 ${cands.length} 种物品，获得 ${gain} 金币`, 'gold', 'trade');
   return gain;
 }
 window.buyItem = buyItem; window.sellAll = sellAll; window.sellAllJunk = sellAllJunk;
@@ -1252,7 +1299,7 @@ function plantAt(idx, seedId){
   if (Game.inventory[seedId]<=0) delete Game.inventory[seedId];
   Game.farms['farm'+idx] = { seedId, remain: seed.grow, grow: seed.grow };
   saveGame();
-  log(`🌱 种下 ${seed.name}`, 'farming');
+  log(`🌱 种下 ${seed.name}`, 'farming', 'skill');
 }
 function firstSeed(){
   const e = Object.entries(Game.inventory).filter(([id])=>Items[id]&&Items[id].type==='seed');
@@ -1314,18 +1361,32 @@ function renderStats(){
 function confirmReset(){
   if(confirm('确定清空所有进度？此操作不可恢复。')){
     resetToDefault();
-    UI.log('存档已重置', 'bad');
+    UI.log('存档已重置', 'bad', 'sys');
     renderCurrent(); UI.refreshAll();
   }
 }
 
 // ---------- 日志 ----------
 function renderLog(){
-  document.getElementById('content').innerHTML = `
-    <div class="page"><h2>📜 日志</h2><div class="loglist">${
-      UI.logs.map(l=>`<div class="logitem" style="color:${l.color}">[${l.t.toLocaleTimeString()}] ${esc(l.msg)}</div>`).join('')
-      || `<div class="empty">暂无日志</div>`}
-    </div></div>`;
+  const cats = [['all','全部'],['skill','技能'],['combat','战斗'],['trade','交易'],['sys','系统']];
+  const cur = UI.logFilter || 'all';
+  const list = UI.logs.filter(l=>cur==='all' || (l.cat||'sys')===cur);
+  const el = document.getElementById('content');
+  el.innerHTML = `
+    <div class="page"><h2>📜 日志</h2>
+      <div class="logbar">
+        <div class="logchips">${cats.map(([k,n])=>`<button class="logchip${cur===k?' active':''}" data-cat="${k}">${n}</button>`).join('')}</div>
+        <button id="btnClearLog" class="btn-mini">清空</button>
+      </div>
+      <div class="loglist">${
+        list.map(l=>`<div class="logitem" style="color:${l.color}">[${l.t.toLocaleTimeString()}] ${esc(l.msg)}</div>`).join('')
+        || `<div class="empty">暂无日志</div>`}
+      </div></div>`;
+  if (el.querySelectorAll){
+    el.querySelectorAll('.logchip').forEach(b=>b.addEventListener('click',()=>{ UI.logFilter=b.dataset.cat; renderLog(); }));
+    const clr = el.querySelector('#btnClearLog');
+    if (clr) clr.addEventListener('click', ()=>{ UI.logs=[]; UI.logFilter='all'; renderLog(); });
+  }
 }
 
 // ---------- 状态栏 ----------
@@ -1414,6 +1475,7 @@ UI.openSettings = openSettings;
 function init(){
   loadGame();
   bindTabs();
+  bindKeyboardNav();
   document.getElementById('btnSave').addEventListener('click', ()=>{saveGame();UI.toast('已存档');});
   document.getElementById('btnSettings').addEventListener('click', openSettings);
   document.getElementById('btnStop').addEventListener('click', ()=>{ stopActivity(); Game.combat=null; autoAttack=false; UI.refreshActivity(); });
@@ -1436,13 +1498,14 @@ function init(){
       if (sig !== farmSig){ farmSig = sig; renderFarming(); }  // 结构变化才重绘
       else updateFarmingLive();                                 // 否则只更新进度
     }
+    sampleXpRates();                                     // 经验速率采样（升级预估）
     if (UI.currentTab==='skills') updateSkillsLive();   // 轻量更新进度条
     if (UI.currentTab==='queue') updateQueueLive();     // 轻量更新队列进度
     if (autoEquipCheck) autoEquipCheck();
     if (Game.auto_buy_tools && typeof autoBuyTools==='function') autoBuyTools();
     if (typeof checkMilestoneToast==='function') checkMilestoneToast();  // 里程碑解锁提示
   }, 800);
-  UI.log('欢迎来到放置王国！从【技能】选一个工作开始吧。', 'combat');
+  UI.log('欢迎来到放置王国！从【技能】选一个工作开始吧。', 'combat', 'sys');
   // 离线进度
   offlineProgress();
 }
@@ -1497,7 +1560,7 @@ function offlineProgress(){
   if (crops > 0) lines.push(`🌾 收获 ${crops} 份作物`);
   if (!gains.length && !crops) lines.push('（离线期间没有进行中的活动）');
   const summary = lines.join('\n');
-  UI.log(summary.replace(/\n/g,' · '), 'gold');
+  UI.log(summary.replace(/\n/g,' · '), 'gold', 'sys');
   UI.toast(summary);
   Game.stats.lastOffline = { at:now, seconds:eff, time:timeTxt, gains:gains.slice(), crops };
   saveGame();

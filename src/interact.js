@@ -62,7 +62,7 @@ function equipItem(itemId){
   saveGame();
   UI && UI.refreshGear();
   UI && UI.refreshInventory();
-  log(`✅ 已装备 ${it.name}`, 'good');
+  log(`✅ 已装备 ${it.name}`, 'good', 'trade');
 }
 function relevantLevel(it){
   if (it.weapon && it.ranged) return levelOf('ranged');
