@@ -217,15 +217,77 @@ function combatTick(elapsed){
     doPlayerAttack(c, m);
   }
   if (c.monsterHp <= 0){ meetKill(c,m); return; }
+  // 迟缓药剂计时
+  if (c.slow){
+    c.slow.remaining -= elapsed;
+    if (c.slow.remaining <= 0){
+      delete c.slow;
+      log(`💤 迟缓效果结束，${m.name} 恢复正常速度`, 'gold', 'combat');
+    }
+  }
   // 怪物攻击间隔
-  const mSpeed = Math.max(0.2, monsterInterval(m));
+  const mSpeed = Math.max(0.2, monsterInterval(m, c));
   c.maxtimer = (c.maxtimer||0) + elapsed;
   while (c.maxtimer >= mSpeed && c.playerHp > 0){
     c.maxtimer -= mSpeed;
     doMonsterAttack(c, m);
   }
+  // Boss 专属技能：独立计时，命中更疼且部分忽略防御
+  if (m.special && c.playerHp > 0 && c.monsterHp > 0){
+    c.spec = (c.spec||0) + elapsed;
+    if (c.spec >= (m.special.every||10)){
+      c.spec = 0;
+      doMonsterSpecial(c, m);
+    }
+  }
   // 死亡只在这里结算一次，避免重复计数
   if (c.playerHp <= 0){ onPlayerDeath(c,m); }
+}
+
+// ---------- 战斗道具（非回血，作用于战场状态）----------
+function useCombatItem(id){
+  const it = Items[id];
+  if (!it || !it.combatUse){ UI && UI.toast('该物品不能这样使用'); return false; }
+  if (!Game.combat){ UI && UI.toast('💤 这类道具只能在战斗中使用'); return false; }
+  if ((Game.inventory[id]||0) <= 0){ UI && UI.toast('背包里没有该物品'); return false; }
+  if (it.combatUse === 'slow'){
+    Game.inventory[id]--;
+    if (Game.inventory[id] <= 0) delete Game.inventory[id];
+    const c = Game.combat, m = Monsters[c.monsterId];
+    const mult = it.slowMult || 0.5, dur = it.slowDur || 10;
+    c.slow = { remaining: dur, mult };
+    UI && UI.floatText(monsterEl(), `💤 ${it.name}`, '#8b9dff');
+    UI && UI.toast(`💤 ${m.name} 攻击间隔 +${Math.round(mult*100)}%（${dur}s）`);
+    log(`💤 泼洒 ${it.name}：${m.name} 攻击变慢`, 'gold', 'combat');
+    saveGame();
+    return true;
+  }
+  return false;
+}
+window.useCombatItem = useCombatItem;
+
+// Boss 专属技能：周期性释放，伤害更高且部分穿透防御
+function doMonsterSpecial(c, m){
+  const sp = m.special;
+  if (!sp) return;
+  if (chance(playerEvasion())){ UI && UI.floatText(playerEl(), `💨 躲开 ${sp.name}`, '#8b96ac'); return; }
+  const def = totalDefence() * (1 - (sp.pierce||0));
+  let dmg = roll(1, Math.max(1, m.atk*(sp.dmg||1.5) - def*0.3));
+  c.playerHp -= dmg;
+  c.dmgIn = (c.dmgIn||0) + dmg;
+  Game.stats.damageTaken = (Game.stats.damageTaken||0) + dmg;
+  UI && UI.hit(playerEl(), `-${dmg}`, '#ff8800');
+  UI && UI.floatText(monsterEl(), `💥 ${sp.name}`, '#ff9f43');
+  log(`💥 ${m.name} 使出 ${sp.name}！${dmg} 点${sp.pierce?'穿透':'重'}伤害`, 'bad', 'combat');
+  if (sp.healPct){
+    const heal = Math.floor(m.hp * sp.healPct);
+    const before = c.monsterHp;
+    c.monsterHp = Math.min(m.hp, c.monsterHp + heal);
+    const gained = Math.max(0, c.monsterHp - before);
+    if (gained){ UI && UI.floatText(monsterEl(), `+${gained} ❤️`, '#58b368'); log(`🩸 ${m.name} 汲取 ${gained} 点生命`, 'bad', 'combat'); }
+  }
+  // 同样触发自动进食
+  if (c.playerHp > 0 && c.playerHp <= playerMaxHp() * Game.autoEatThreshold) autoEat(c, playerMaxHp());
 }
 
 function playerAttackInterval(){
@@ -237,8 +299,11 @@ function playerAttackInterval(){
   base -= levelOf(skill)*0.008;
   return Math.max(1.6, base);
 }
-function monsterInterval(m){
-  return Math.max(2.0, 3.2 - m.hp*0.002);
+function monsterInterval(m, c){
+  const base = Math.max(2.0, 3.2 - m.hp*0.002);
+  // 迟缓药剂：拉长怪物攻击间隔（一次性道具，战斗内生效一段时间）
+  const slow = (c && c.slow && c.slow.remaining > 0) ? (c.slow.mult||0) : 0;
+  return Math.max(2.0, base * (1 + slow));
 }
 function combatMode(){
   // 战斗中进行风格固定；未战斗时按玩家偏好（不可用时自动回落）

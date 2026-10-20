@@ -896,7 +896,7 @@ try{
   assert(/html,body\{[^}]*overflow-x:hidden/.test(css), '已禁止整页横向滚动');
   // 21d. 关键组件在手机断点内都有适配
   const mob = css.slice(css.indexOf('@media (max-width:720px)'), css.indexOf('@media (max-width:400px)'));
-  ['#topbar','#tabs','#content','#statusbar','.skills-grid','.invgrid','.page-stats','.statgrid','.monsters','.plots','.arena','.qitem','.shop-layout','.gear-slots','#modalBox'].forEach(sel=>{
+  ['#topbar','#tabs','#content','#statusbar','.skills-grid','.invgrid','.page-stats','.statgrid','.monsters','.plots','.arena','.qitem','.shop-layout','.gear-slots','#modalBox','.stylepick','.sell-toolbar'].forEach(sel=>{
     assert(mob.includes(sel), `手机断点已适配 ${sel}`);
   });
   // 21e. 表单控件在手机上 >=16px，避免 iOS 自动放大
@@ -1108,6 +1108,165 @@ try{
   console.log('PASS: 法杖与魔法战斗风格（装备/制作/切换/不耗箭矢/经验/存档/渲染）通过');
 }catch(e){
   console.error('FAIL: 法杖与魔法战斗风格: '+e.message); console.error(e.stack); process.exitCode=1;
+}
+
+// ---- 25. 批量操作：库存一键转存 / 农田一键补种 ----
+try{
+  G.resetToDefault();
+  // 25a. 背包 → 仓库
+  ST.giveItem('normal_log', 7, false); ST.giveItem('bones', 3, false);
+  const movedKinds = G.moveAllTo('toBank');
+  assert(movedKinds >= 2, '全部存入返回迁移的种类数 -> '+movedKinds);
+  assert(Object.keys(ST.Game.inventory).length === 0, '存入后背包被清空');
+  assert((ST.Game.banking['normal_log']||0) >= 7 && (ST.Game.banking['bones']||0) >= 3, '仓库收到全部数量');
+  // 25b. 仓库 → 背包（数量不丢失）
+  const totalBefore = ST.totalOf('normal_log');
+  const backKinds = G.moveAllTo('toInv');
+  assert(backKinds === movedKinds, '取回的种类数一致 -> '+backKinds);
+  assert(Object.keys(ST.Game.banking).length === 0, '取回后仓库被清空');
+  assert(ST.totalOf('normal_log') === totalBefore, '往返转存没有丢失物品 -> '+ST.totalOf('normal_log'));
+  // 25c. 空集合调用安全
+  ST.Game.inventory = {}; ST.Game.banking = {};
+  assert(G.moveAllTo('toBank') === 0, '空背包调用安全');
+  assert(G.moveAllTo('toInv') === 0, '空仓库调用安全');
+
+  // 25d. 农田一键补种：填满空地，遵循等级与数量限制
+  ST.Game.farms = {}; ST.Game.skills.farming.level = 20;
+  ST.giveItem('seed_potato', 6, false);
+  const n1 = G.plantAll('seed_potato');
+  assert(n1 === 4, '一键补种填满 4 块地 -> '+n1);
+  assert(Object.keys(ST.Game.farms).length === 4, '农田被全部占用');
+  assert(ST.totalOf('seed_potato') === 2, '扣除对应种子 -> '+ST.totalOf('seed_potato'));
+  assert(G.plantAll('seed_potato') === 0, '没有空地时不再种植');
+  ST.Game.farms = {}; ST.Game.skills.farming.level = 1;
+  ST.giveItem('seed_snapdragon', 2, false);
+  assert(G.plantAll('seed_snapdragon') === 0, '农牧等级不足时拒绝批量种植');
+
+  // 25e. 三个页面的批量入口都渲染出来
+  ST.Game.farms = {}; ST.giveItem('seed_potato', 2, false);
+  G.renderInventory();
+  assert(context.document.getElementById('content').innerHTML.includes('data-moveall'), '背包页渲染一键存入按钮');
+  G.renderBank();
+  assert(context.document.getElementById('content').innerHTML.includes('data-moveall'), '仓库页渲染一键取回按钮');
+  G.renderFarming();
+  assert(context.document.getElementById('content').innerHTML.includes('data-seedall'), '农牧页渲染全部种植按钮');
+
+  console.log('PASS: 批量操作（库存一键转存 / 农田一键补种 / 入口渲染）通过');
+}catch(e){
+  console.error('FAIL: 批量操作: '+e.message); console.error(e.stack); process.exitCode=1;
+}
+
+// ---- 26. 稀有度：数据推导审计 + 展示接线 ----
+try{
+  const ORDER = ['BROKEN','COMMON','UNCOMMON','RARE','LEGENDARY','MYTHIC','SPECIAL'];  // SPECIAL 为唯一来源，级别最高
+  const rank = id => ORDER.indexOf(id);
+
+  // 26a. 每个物品都能推出合法稀有度，且名称 / 色值可用
+  const bad = [];
+  Object.values(ST.Items).forEach(it=>{
+    const id = ST.rarityId(it);
+    if (!ST.RARITY[id]) bad.push(`${it.id}:${id}`);
+    else if (!ST.rarityName(it) || !/^#/.test(ST.rarityColor(it))) bad.push(`${it.id}:缺色`);
+  });
+  assert(bad.length === 0, '所有物品都能推出合法稀有度（含名称与色值）' + (bad.length?`，异常: ${bad.slice(0,3).join('、')}`:''));
+
+  // 26b. 单调性：回收价更高的物品，稀有度不应更低（显式指定 rarity 的物品不参与，它们有自己的设定）
+  const valued = Object.values(ST.Items).filter(it=>(it.value||0) > 0 && !(it.rarity && ST.RARITY[it.rarity]));
+  let inversion = '';
+  for (const a of valued){
+    for (const b of valued){
+      if (a.id === b.id) continue;
+      if (a.value > b.value && rank(ST.rarityId(a)) < rank(ST.rarityId(b))){
+        inversion = `${a.id}(${a.value}/${ST.rarityId(a)}) vs ${b.id}(${b.value}/${ST.rarityId(b)})`;
+        break;
+      }
+    }
+    if (inversion) break;
+  }
+  assert(!inversion, '回收价与稀有度单调一致' + (inversion?`，反例: ${inversion}`:''));
+
+  // 26c. 高层装备确实更稀有，新手工具是普通
+  assert(rank(ST.rarityId(ST.Items['runite_sword'])) > rank(ST.rarityId(ST.Items['bronze_sword'])),
+    '符文剑比青铜剑稀有 -> '+ST.rarityId(ST.Items['runite_sword'])+' > '+ST.rarityId(ST.Items['bronze_sword']));
+  assert(ST.rarityId(ST.Items['bronze_axe']) === 'COMMON', '新手工具为普通 -> '+ST.rarityId(ST.Items['bronze_axe']));
+  assert(ST.rarityId(ST.Items['ring_dragon']) === 'SPECIAL', '唯一来源的掉落被标为特殊 -> '+ST.rarityId(ST.Items['ring_dragon']));
+  assert(rank(ST.rarityId(ST.Items['ring_dragon'])) > rank(ST.rarityId(ST.Items['ring_runite'])), '特殊高于普通推导的同类装备');
+
+  // 26d. 图块渲染带上稀有度色条类（背包 / 商店 / 装备页）
+  G.resetToDefault();
+  ST.giveItem('runite_sword', 1, false);
+  const rc = ST.rarityClass(ST.Items['runite_sword']);
+  assert(/^r-[a-z]+$/.test(rc), '稀有度类名格式合法 -> '+rc);
+  G.renderInventory();
+  assert(context.document.getElementById('content').innerHTML.includes('class="invtile '+rc),
+    '背包图块带上稀有度类名 -> '+rc);
+  G.renderShop();
+  assert(context.document.getElementById('content').innerHTML.includes('r-'), '商店图块标出稀有度');
+  G.renderEquipment();
+  assert(context.document.getElementById('content').innerHTML.includes('r-'), '装备页可装备列表标出稀有度');
+
+  // 26e. 每个用到的稀有度都有对应色条样式（普通刻意无色，让颜色有信息量）
+  const css2 = fs.readFileSync(path.join(__dirname,'..','style.css'),'utf8');
+  const usedCls = Array.from(new Set(Object.values(ST.Items).map(it=>ST.rarityClass(it))));
+  const missingCls = usedCls.filter(c=>c!=='r-common' && !css2.includes('.'+c));
+  assert(missingCls.length === 0, '每个稀有度都有对应色条样式' + (missingCls.length?`，缺: ${missingCls.join(',')}`:''));
+
+  console.log('PASS: 稀有度（合法推导 / 单调性 / 三类页面接线 / 样式齐全）通过');
+}catch(e){
+  console.error('FAIL: 稀有度: '+e.message); console.error(e.stack); process.exitCode=1;
+}
+
+// ---- 27. 战斗道具（迟缓药剂）与 Boss 专属技能 ----
+try{
+  G.resetToDefault();
+  // 27a. 非战斗中使用应被拒绝且不消耗
+  ST.Game.combat = null;
+  ST.giveItem('slow_potion', 2, false);
+  assert(G.useCombatItem('slow_potion') === false, '非战斗中不能使用迟缓药剂');
+  assert(ST.totalOf('slow_potion') === 2, '被拒绝时不消耗道具 -> '+ST.totalOf('slow_potion'));
+
+  // 27b. 战斗中使用：拉长怪物攻击间隔
+  ST.Game.skills.combat.level = 40;
+  G.startCombat('guard_titan');
+  assert(!!ST.Game.combat, '达到等级门槛可挑战 Boss');
+  const base = G.monsterInterval(ST.Monsters['guard_titan'], null);
+  assert(G.useCombatItem('slow_potion') === true, '战斗中泼洒迟缓药剂成功');
+  assert(ST.totalOf('slow_potion') === 1, '使用后消耗 1 瓶 -> '+ST.totalOf('slow_potion'));
+  const slowed = G.monsterInterval(ST.Monsters['guard_titan'], ST.Game.combat);
+  assert(slowed > base, '怪物攻击间隔变长 -> '+base.toFixed(2)+'s → '+slowed.toFixed(2)+'s');
+
+  // 27c. 到点自动解除
+  ST.Game.combat.slow.remaining = 0.1;
+  G.combatTick(0.2);
+  assert(!ST.Game.combat || !ST.Game.combat.slow, '迟缓效果到期自动结束');
+
+  // 27d. Boss 专属技能：造成承伤，汲取类还会回血
+  ST.Game.combat = null;
+  ST.Game.autoEatThreshold = 0.01;                    // 排除自动进食干扰
+  ST.Game.skills.combat.level = 70;
+  G.startCombat('elder_lich');
+  const lichMax = ST.Monsters['elder_lich'].hp;
+  ST.Game.combat.monsterHp = Math.floor(lichMax*0.5);
+  ST.Game.combat.playerHp = G.playerMaxHp();
+  const hpBefore = ST.Game.combat.playerHp;
+  G.doMonsterSpecial(ST.Game.combat, ST.Monsters['elder_lich']);
+  assert(ST.Game.combat.playerHp < hpBefore, '专属技能造成承伤 -> '+(hpBefore - ST.Game.combat.playerHp));
+  assert(ST.Game.combat.monsterHp > Math.floor(lichMax*0.5), '汲取生命会回复 Boss 血量 -> '+ST.Game.combat.monsterHp);
+
+  // 27e. 只给 Boss 配专属技能，普通怪没有
+  assert(!ST.Monsters['goblin'].special, '普通怪没有专属技能');
+  const noSkill = Object.values(ST.Monsters).filter(m=>m.boss && !m.special).map(m=>m.id);
+  assert(noSkill.length === 0, '每个 Boss 都有专属技能' + (noSkill.length?`，缺: ${noSkill.join('、')}`:''));
+  const noName = Object.values(ST.Monsters).filter(m=>m.special && !m.special.name).map(m=>m.id);
+  assert(noName.length === 0, '专属技能都有名字（用于提示文案）');
+
+  // 27f. 背包页给出使用入口
+  G.renderInventory();
+  assert(context.document.getElementById('content').innerHTML.includes('data-use'), '背包页渲染战斗道具的入口');
+
+  console.log('PASS: 战斗道具与 Boss 专属技能（延迟/消耗/到期/回血/入口）通过');
+}catch(e){
+  console.error('FAIL: 战斗道具与 Boss 专属技能: '+e.message); console.error(e.stack); process.exitCode=1;
 }
 
 console.log('\n=== 引擎冒烟测试结束 ===');

@@ -636,7 +636,7 @@ function renderBank(){
   const entries = sortEntries(Object.entries(Game.banking).filter(([id,qty])=>Items[id] && qty>0), cur);
   const rows = entries.map(([id,qty])=>{
     const it = Items[id];
-    return `<div class="invtile" data-item="${id}">
+    return `<div class="invtile ${rarityClass(it)}" data-item="${id}" title="稀有度：${rarityName(it)}">
       <div class="tile-head">
         <span class="iico">${it.icon}</span><span class="iname">${it.name}</span>
         <span class="icount">×${fmt(qty)}</span>
@@ -652,6 +652,10 @@ function renderBank(){
       <h2>🏦 仓库</h2>
       <p class="hint">仓库可存放物品，战斗/制作自动从背包取用。需要更多空间时全部物品可转背包。</p>
       ${sortBarHtml(cur, 'data-banksort')}
+      <div class="sell-toolbar">
+        <span>仓库 <b>${entries.length}</b> 种 · 共 <b>${fmt(entries.reduce((s,[,q])=>s+q,0))}</b> 个</span>
+        <button class="btn-mini" data-moveall="toInv" ${entries.length?'':'disabled'}>🎒 全部取回背包</button>
+      </div>
       <div class="invgrid">${rows}</div>
     </div>`;
   bindInvActions();
@@ -700,7 +704,7 @@ function renderInventory(){
   const rows = entries.map(([id,qty])=>{
     const it = Items[id];
     const actions = actionButtons(it, id);
-    return `<div class="invtile" data-item="${id}">
+    return `<div class="invtile ${rarityClass(it)}" data-item="${id}" title="稀有度：${rarityName(it)}">
       <div class="tile-head">
         <span class="iico">${it.icon}</span>
         <span class="iname">${it.name}</span>
@@ -716,8 +720,12 @@ function renderInventory(){
   el.innerHTML = `
     <div class="page">
       <h2>🎒 背包</h2>
-      <p class="hint">背包物品用于装备与消耗。『自动装备』开启时，更好的武器/防具会自动穿戴上。</p>
+      <p class="hint">背包物品用于装备与消耗。『自动装备』开启时，更好的武器/防具会自动穿戴上。图块左侧色条表示稀有度（按回收价推导）：🟢 罕见 · 🔵 稀有 · 🟠 传说 · 🔴 神话。</p>
       ${sortBarHtml(cur, 'data-invsort')}
+      <div class="sell-toolbar">
+        <span>背包 <b>${entries.length}</b> 种 · 共 <b>${fmt(entries.reduce((s,[,q])=>s+q,0))}</b> 个</span>
+        <button class="btn-mini" data-moveall="toBank" ${entries.length?'':'disabled'}>📦 全部存入仓库</button>
+      </div>
       <div class="invgrid">${rows}</div>
     </div>`;
   bindInvActions();
@@ -731,6 +739,7 @@ function actionButtons(it, id){
     h += `<button class="mini" data-eat="${id}">${it.type==='potion'?'使用':'吃'}</button>`;
   }
   if (it.type==='seed') h += `<button class="mini" data-seed="${id}">种植</button>`;
+  if (it.combatUse) h += `<button class="mini" data-use="${id}">${it.combatUse==='slow'?'泼洒':'使用'}</button>`;
   return h;
 }
 function bindInvActions(){
@@ -747,6 +756,13 @@ function bindInvActions(){
     const [side,id] = b.dataset.drop.split(':');
     dropItem(side, id);
     renderCurrent();
+  }));
+  document.querySelectorAll('[data-use]').forEach(b=>b.addEventListener('click', ()=>{
+    useCombatItem(b.dataset.use);
+    renderCurrent();
+  }));
+  document.querySelectorAll('[data-moveall]').forEach(b=>b.addEventListener('click', ()=>{
+    moveAllTo(b.dataset.moveall);
   }));
 }
 // 进食/喝药：仅在战斗中有意义，直接回复当前生命
@@ -769,6 +785,32 @@ function dropItem(side, id){
   delete bag[id];
   saveGame(); renderCurrent();
 }
+// 批量转存：一次性把整页物品移过去（合并结算，只提示一次）
+function moveAllTo(dir){
+  const toBank = dir === 'toBank';
+  const from = toBank ? Game.inventory : Game.banking;
+  const to   = toBank ? Game.banking   : Game.inventory;
+  const ids = Object.keys(from).filter(id=>Items[id] && (from[id]||0) > 0);
+  if (!ids.length){
+    UI.toast(toBank ? '背包里没有东西可以存入' : '仓库是空的');
+    return 0;
+  }
+  let kinds = 0, pieces = 0;
+  ids.forEach(id=>{
+    const qty = Math.floor(from[id]||0);
+    if (qty <= 0) return;
+    to[id] = (to[id]||0) + qty;
+    delete from[id];
+    kinds++; pieces += qty;
+  });
+  saveGame();
+  const txt = `${toBank?'📦 已存入仓库':'🎒 已取回背包'} ${kinds} 种 / ${fmt(pieces)} 个`;
+  log(txt, 'gold', 'trade');
+  UI.toast(txt);
+  renderCurrent();
+  return kinds;
+}
+window.moveAllTo = moveAllTo;
 // 移动物品：dir 为 'toBank'（背包→仓库）或 'toInv'（仓库→背包）
 function moveItem(id, dir){
   if (dir==='toBank'){
@@ -829,7 +871,7 @@ function renderEquipment(){
     const delta = gearDeltaHtml(it);
     const better = gearIsBetter(it);
     const cur = Game.gear[equipSlotOf(it)];
-    return `<div class="invtile">
+    return `<div class="invtile ${rarityClass(it)}" title="稀有度：${rarityName(it)}">
       <div class="tile-head">
         <span class="iico">${it.icon}</span>
         <span class="iname">${it.name}</span>
@@ -975,7 +1017,7 @@ function renderShop(){
       const unit = Math.round(s.cost/s.qty);
       const sellable = it.value && !it.equip;
       const sub = [s.note, `单价 ${unit}💰`, sellable ? `回收 ${it.value}💰` : '不可出售'].filter(Boolean).join(' · ');
-      return `<div class="invtile${state.ok?'':' off'}">
+      return `<div class="invtile ${rarityClass(it)}${state.ok?'':' off'}" title="稀有度：${rarityName(it)}">
         <div class="tile-head">
           <span class="iico">${it.icon}</span>
           <span class="iname">${it.name}<span class="qty">×${s.qty}</span></span>
@@ -1356,13 +1398,14 @@ function renderFarming(){
       <div class="tile-acts">
         <span class="stage">${s.grow}s 成熟${s.lvl>1?` · Lv${s.lvl}`:''}</span>
         <button class="mini" data-seedto="${id}">种植</button>
+        <button class="mini ghost" data-seedall="${id}" title="一次填满所有空地">全部种植</button>
       </div>
     </div>`;
   }).join('')||`<div class="empty">背包里没有种子（渔/矿/战利品可得，或到商店购买）</div>`;
   el.innerHTML = `
     <div class="page">
       <h2>🌱 农牧 · 等级 ${farmLevel}</h2>
-      <p class="hint">种植种子，等待成熟收获作物。作物可作为食物或炼制材料。离开游戏时作物也会继续生长。</p>
+      <p class="hint">种植种子，等待成熟收获作物（成熟即刻自动收获）。作物可作为食物或炼制材料；种子 tile 上的「全部种植」会一次填满所有空地。离开游戏时作物也会继续生长。</p>
       <div class="farm-side">
         <div class="farm-stat"><b>${planted}/4</b>已种植</div>
         <div class="farm-stat"><b>${seedQty}</b>持有种子</div>
@@ -1377,6 +1420,9 @@ function renderFarming(){
     // 种到第一块空地
     plantSeed(b.dataset.seedto);
     renderFarming();
+  }));
+  document.querySelectorAll('[data-seedall]').forEach(b=>b.addEventListener('click', ()=>{
+    plantAll(b.dataset.seedall);
   }));
   document.querySelectorAll('[data-choose]').forEach(b=>b.addEventListener('click', ()=>{
     const plot = parseInt(b.dataset.choose);
@@ -1431,6 +1477,32 @@ function plantAt(idx, seedId){
   saveGame();
   log(`🌱 种下 ${seed.name}`, 'farming', 'skill');
 }
+// 一键补种：用同一种子填满所有空地（受等级与种子数量限制）
+function plantAll(seedId){
+  const seed = Items[seedId];
+  if (!seed || seed.type!=='seed'){ UI.toast('无效的种子'); return 0; }
+  if (levelOf('farming') < (seed.lvl||1)){ UI.toast(`🔒 需要农牧 ${seed.lvl} 级才能种植`); return 0; }
+  let n = 0;
+  for (let i=0;i<4;i++){
+    const slot = 'farm'+i;
+    if (Game.farms[slot]) continue;
+    if ((Game.inventory[seedId]||0) <= 0) break;
+    Game.inventory[seedId]--;
+    if (Game.inventory[seedId]<=0) delete Game.inventory[seedId];
+    Game.farms[slot] = { seedId, remain: seed.grow, grow: seed.grow };
+    n++;
+  }
+  if (n){
+    saveGame();
+    log(`🌱 一次性种下 ${seed.name} ×${n}`, 'farming', 'skill');
+    UI.toast(`🌱 种下 ${seed.name} ×${n}`);
+  } else {
+    UI.toast('没有空地或种子不足');
+  }
+  renderFarming();
+  return n;
+}
+window.plantAll = plantAll;
 function firstSeed(){
   const e = Object.entries(Game.inventory).filter(([id])=>Items[id]&&Items[id].type==='seed');
   return e.length? e[0][0] : null;

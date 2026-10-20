@@ -111,8 +111,8 @@ addItem(
   I('goblin_ear','地精耳朵','other', { value: 10, icon:'👂' }),
   I('wolf_pelt','狼皮','leather', { value: 15, icon:'🐺' }),
   I('eye_of_newt','新特之眼','other', { value: 25, icon:'👁️' }),
-  I('slow_potion','迟缓药剂','other', { value: 40, icon:'🧪' }),
-  I('dragon_scale','龙鳞','other', { value: 200, icon:'🐉' }),
+  I('slow_potion','迟缓药剂','other', { value: 40, icon:'🧪', combatUse:'slow', slowMult:0.5, slowDur:12 }),
+  I('dragon_scale','龙鳞','other', { value: 200, icon:'🐉', rarity:'SPECIAL' }),   // 唯一来源：巨龙系掉落
   I('essense','法力精华','essense', { value: 5, icon:'🟣' }),
 );
 
@@ -297,7 +297,7 @@ addItem(
   I('ring_steel','钢指环','ring', { value: 110, equip:true, slot:'ring', dmg:3, lvl:25, icon:'💍' }),
   I('ring_mythril','秘银指环','ring', { value: 220, equip:true, slot:'ring', dmg:5, lvl:35, icon:'💍' }),
   I('ring_runite','符文指环','ring', { value: 420, equip:true, slot:'ring', dmg:8, lvl:50, icon:'💍' }),
-  I('ring_dragon','龙之指环','ring', { value: 900, equip:true, slot:'ring', dmg:14, lvl:60, icon:'💍' }),
+  I('ring_dragon','龙之指环','ring', { value: 900, equip:true, slot:'ring', dmg:14, lvl:60, icon:'💍', rarity:'SPECIAL' }),
   I('amulet_topaz','黄玉护符','ring', { value: 80, equip:true, slot:'amulet', def:3, xpBonus:0.04, lvl:20, icon:'📿' }),
   I('amulet_emerald','祖母绿护符','ring', { value: 180, equip:true, slot:'amulet', def:6, xpBonus:0.06, lvl:35, icon:'💚' }),
   I('amulet_ruby','红宝石护符','ring', { value: 380, equip:true, slot:'amulet', def:10, xpBonus:0.10, lvl:50, icon:'❤️' }),
@@ -347,12 +347,16 @@ addMonster({ id:'dragon', name:'红龙', hp:300, atk:32, def:18, xp:520, loot:[[
 
 // ---- Boss 敌人（需战斗等级门槛，击败获得大量金币与稀有装备）----
 // { boss:true, needLvl, loot, coins, firstReward }
+// special: Boss 专属技能（独立计时）every=间隔秒 dmg=攻击力倍率 pierce=无视防御比例 healPct=回复自身生命比例
 addMonster({ id:'guard_titan', name:'守护巨灵', boss:true, hp:900, atk:45, def:25, xp:2000, needLvl:30,
-  loot:[['ring_bronze',0.25,1],['gold_bar',0.5,1],['essense',0.6,2],['bones',0.7,2]], coins:150, firstReward:{coins:500, ring:'ring_bronze'} });
+  loot:[['ring_bronze',0.25,1],['gold_bar',0.5,1],['essense',0.6,2],['bones',0.7,2]], coins:150, firstReward:{coins:500, ring:'ring_bronze'},
+  special:{ name:'大地震击', every:9, dmg:1.8, pierce:0.5 } });
 addMonster({ id:'dragon_queen', name:'巨龙女王', boss:true, hp:2200, atk:72, def:40, xp:6500, needLvl:45,
-  loot:[['amulet_emerald',0.2,1],['dragon_scale',0.6,2],['runite_ore',0.4,1],['essense',0.8,3]], coins:400, firstReward:{coins:1600, ring:'ring_mythril'} });
+  loot:[['amulet_emerald',0.2,1],['dragon_scale',0.6,2],['runite_ore',0.4,1],['essense',0.8,3]], coins:400, firstReward:{coins:1600, ring:'ring_mythril'},
+  special:{ name:'龙息灼烧', every:11, dmg:1.6, pierce:0.7 } });
 addMonster({ id:'elder_lich', name:'远古巫妖', boss:true, hp:5200, atk:115, def:70, xp:16000, needLvl:62,
-  loot:[['amulet_ruby',0.25,1],['ring_dragon',0.15,1],['blood_rune',0.4,1],['runite_ore',0.5,2],['bones',0.9,3]], coins:1200, firstReward:{coins:4000, ring:'ring_dragon'} });
+  loot:[['amulet_ruby',0.25,1],['ring_dragon',0.15,1],['blood_rune',0.4,1],['runite_ore',0.5,2],['bones',0.9,3]], coins:1200, firstReward:{coins:4000, ring:'ring_dragon'},
+  special:{ name:'汲取生命', every:10, dmg:1.4, pierce:0.3, healPct:0.25 } });
 
 // ---------- 商店 ----------
 // 商店分类（渲染时按此顺序分组）
@@ -436,3 +440,23 @@ addItem(
   I('runite_rod','符文钓竿','tool', { equip:true, size:3, rodPower:40, lvl:50, slot:'rod', icon:'🎣', value:6000 }),
   I('health_pot','治疗药水','potion', { heal:150, value:40, consumable:true, equip:true, icon:'🧴' }),
 );
+
+// ---------- 稀有度 ----------
+// 由回收价推导，不再手工维护第二张表；个别特殊物品可用 rarity 字段显式指定。
+// 阈值从高到低匹配：神话 ≥1000 / 传说 ≥300 / 稀有 ≥100 / 罕见 ≥30，其余为普通。
+const RARITY_TIERS = [ [1000,'MYTHIC'], [300,'LEGENDARY'], [100,'RARE'], [30,'UNCOMMON'], [0,'COMMON'] ];
+function rarityId(it){
+  if (it && it.rarity && RARITY[it.rarity]) return it.rarity;
+  const v = (it && it.value) || 0;
+  for (const [need, id] of RARITY_TIERS) if (v >= need) return id;
+  return 'COMMON';
+}
+function rarityMeta(it){ return RARITY[rarityId(it)] || RARITY.COMMON; }
+function rarityName(it){ return rarityMeta(it).name; }
+function rarityColor(it){ return rarityMeta(it).color; }
+function rarityClass(it){ return 'r-' + rarityId(it).toLowerCase(); }   // 用于在图块左侧描一条稀有度色边
+if (typeof window !== 'undefined'){
+  window.RARITY_TIERS = RARITY_TIERS;
+  window.rarityId = rarityId; window.rarityMeta = rarityMeta;
+  window.rarityName = rarityName; window.rarityColor = rarityColor; window.rarityClass = rarityClass;
+}
