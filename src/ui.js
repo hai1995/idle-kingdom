@@ -111,14 +111,17 @@ function bindTabs(){
     });
   });
 }
-// 键盘导航：数字键 1-9/0 快速切换页签（输入框聚焦或弹窗打开时禁用）
+// 键盘导航：数字键 1-9/0 切换页签；S 手动存档；Esc 关闭弹窗
 function bindKeyboardNav(){
   const tabs = Array.from(document.querySelectorAll('#tabs .tab'));
   document.addEventListener('keydown', (e)=>{
+    const modal = document.getElementById('modal');
+    const modalOpen = !!(modal && modal.classList && !modal.classList.contains('hidden'));
+    if (e.key==='Escape'){ if (modalOpen && UI.closeModal) UI.closeModal(); return; }
     const t = e.target;
     if (t && (t.tagName==='INPUT' || t.tagName==='SELECT' || t.tagName==='TEXTAREA' || t.isContentEditable)) return;
-    const modal = document.getElementById('modal');
-    if (modal && modal.classList && !modal.classList.contains('hidden')) return;
+    if (modalOpen) return;
+    if (e.key==='s' || e.key==='S'){ saveGame(); UI.toast('已存档'); return; }
     const n = parseInt(e.key, 10);
     const idx = e.key==='0' ? 9 : n-1;
     if (idx>=0 && idx<tabs.length) tabs[idx].click();
@@ -140,9 +143,22 @@ function renderCurrent(){
 }
 
 // ---------- 技能页 ----------
+const SKILL_FILTERS = [['all','全部'],['gather','🪓 采集'],['craft','🔧 加工']];
 function renderSkills(){
   const el = document.getElementById('content');
+  const cur = UI.skillFilter || 'all';
   const totalLvl = Object.values(Game.skills).reduce((s,g)=>s+(g.level||1), 0);
+  const gatherSec = `<h3 class="sec span">🪓 采集</h3>
+      ${skillBlock('woodcutting')}
+      ${skillBlock('mining')}
+      ${skillBlock('fishing')}`;
+  const craftSec = `<h3 class="sec span">🔧 加工</h3>
+      ${skillBlock('smithing')}
+      ${skillBlock('crafting')}
+      ${skillBlock('fletching')}
+      ${skillBlock('cooking')}
+      ${skillBlock('runecrafting')}
+      ${skillBlock('herblore')}`;
   const html = `<div class="page">
     <h2>技能修炼</h2>
     <p class="hint">选择一个采集或制作工作，角色将持续进行。</p>
@@ -152,22 +168,21 @@ function renderSkills(){
       <div class="pstat"><b>×${gatherSpeedMult().toFixed(2)}</b>采集倍率</div>
       <div class="pstat"><b>${milestoneCount()}</b>已解锁里程碑</div>
     </div>
+    <div class="sortbar">
+      <span class="sortlabel">筛选</span>
+      ${SKILL_FILTERS.map(([k,n])=>`<button class="logchip${cur===k?' active':''}" data-skillfilter="${k}">${n}</button>`).join('')}
+    </div>
     <div class="skills-grid">
-      <h3 class="sec span">🪓 采集</h3>
-      ${skillBlock('woodcutting')}
-      ${skillBlock('mining')}
-      ${skillBlock('fishing')}
-      <h3 class="sec span">🔧 加工</h3>
-      ${skillBlock('smithing')}
-      ${skillBlock('crafting')}
-      ${skillBlock('fletching')}
-      ${skillBlock('cooking')}
-      ${skillBlock('runecrafting')}
-      ${skillBlock('herblore')}
+      ${cur==='craft'?'':gatherSec}
+      ${cur==='gather'?'':craftSec}
     </div>
   </div>`;
   el.innerHTML = html;
   bindSkillActions();
+  document.querySelectorAll('[data-skillfilter]').forEach(b=>b.addEventListener('click', ()=>{
+    UI.skillFilter = b.dataset.skillfilter;
+    renderSkills();
+  }));
 }
 function skillBlock(skillId){
   const s = Skills[skillId];
@@ -516,6 +531,16 @@ function updateCombatLive(){
   const di = document.getElementById('cDmgIn');
   if (di) di.textContent = fmt(c.dmgIn||0);
 }
+// 预估单次击杀掉落价值（期望值：金币 + 各掉落物概率×单价×基础数量）
+function monsterLootValue(m){
+  let v = m.coins||0;
+  (m.loot||[]).forEach(([id,ch,qty])=>{
+    const it = Items[id];
+    if (it && it.value) v += ch * it.value * Math.max(1,qty);
+  });
+  return Math.round(v);
+}
+window.monsterLootValue = monsterLootValue;
 function monsterCard(m, locked){
   const cls = 'monster '+(Game.combat&&Game.combat.monsterId===m.id?'sel':'')+(locked?' lock':'');
   const lvlShow = m.needLvl ? ` · 🔒 战斗${m.needLvl}` : '';
@@ -526,7 +551,7 @@ function monsterCard(m, locked){
     <span class="mname">${m.boss?'🦹 ':''}${m.name}${rating?` <span class="badge ${rating.cls}">${rating.tag}</span>`:''}</span>
     <span class="mstat">Lv ${m.xp/10|0} · ❤️ ${m.hp} · ⚔️ ${m.atk}${lvlShow}</span>
     <span class="diff" title="预计承伤占生命上限的 ${risk}%"><i style="width:${risk}%"></i></span>
-    <span class="loot">${m.loot.map(([id])=>(Items[id]&&Items[id].icon)||'').join(' ')}${m.coins?' 💰'+m.coins:''}</span>
+    <span class="loot">${m.loot.map(([id])=>(Items[id]&&Items[id].icon)||'').join(' ')}${m.coins?' 💰'+m.coins:''}<span class="lootval" title="预估单次击杀掉落价值（含金币）">≈💰${fmt(monsterLootValue(m))}</span></span>
   </button>`;
 }
 // 怪物威胁评估：按当前装备估算击杀回合数与承受伤害
@@ -584,9 +609,10 @@ function playerCanKill(m){
 // ---------- 仓库（银行） ----------
 function renderBank(){
   const el = document.getElementById('content');
-  const rows = Object.entries(Game.banking).map(([id,qty])=>{
+  const cur = UI.bankSort || 'default';
+  const entries = sortEntries(Object.entries(Game.banking).filter(([id,qty])=>Items[id] && qty>0), cur);
+  const rows = entries.map(([id,qty])=>{
     const it = Items[id];
-    if (!it) return '';
     return `<div class="invtile" data-item="${id}">
       <div class="tile-head">
         <span class="iico">${it.icon}</span><span class="iname">${it.name}</span>
@@ -602,17 +628,54 @@ function renderBank(){
     <div class="page">
       <h2>🏦 仓库</h2>
       <p class="hint">仓库可存放物品，战斗/制作自动从背包取用。需要更多空间时全部物品可转背包。</p>
+      ${sortBarHtml(cur, 'data-banksort')}
       <div class="invgrid">${rows}</div>
     </div>`;
   bindInvActions();
+  bindSortBars();
 }
 
 // ---------- 背包 ----------
+const INV_SORTS = [['default','默认'],['value','价值↓'],['qty','数量↓'],['type','类型']];
+function invTypeRank(it){
+  if (it.equip && it.weapon) return 0;      // 武器
+  if (it.equip && it.armor) return 1;       // 防具
+  if (it.equip) return 2;                   // 工具/首饰
+  if (it.type==='cooked' || it.type==='fish') return 3;
+  if (it.type==='potion' || it.type==='potion_boost' || it.heal) return 4;
+  if (it.type==='seed' || it.type==='crop') return 5;
+  return 6;                                 // 材料/杂物
+}
+function sortEntries(entries, mode){
+  if (mode==='value') entries.sort((a,b)=>(Items[b[0]].value||0)-(Items[a[0]].value||0));
+  else if (mode==='qty') entries.sort((a,b)=>b[1]-a[1]);
+  else if (mode==='type'){
+    entries.sort((a,b)=>{
+      const r = invTypeRank(Items[a[0]]) - invTypeRank(Items[b[0]]);
+      return r!==0 ? r : Items[a[0]].name.localeCompare(Items[b[0]].name,'zh');
+    });
+  }
+  return entries;
+}
+function sortBarHtml(cur, attr){
+  return `<div class="sortbar"><span class="sortlabel">排序</span>${
+    INV_SORTS.map(([k,n])=>`<button class="logchip${cur===k?' active':''}" ${attr}="${k}">${n}</button>`).join('')
+  }</div>`;
+}
+function bindSortBars(){
+  document.querySelectorAll('[data-invsort]').forEach(b=>b.addEventListener('click', ()=>{
+    UI.invSort = b.dataset.invsort; renderInventory();
+  }));
+  document.querySelectorAll('[data-banksort]').forEach(b=>b.addEventListener('click', ()=>{
+    UI.bankSort = b.dataset.banksort; renderBank();
+  }));
+}
 function renderInventory(){
   const el = document.getElementById('content');
-  const rows = Object.entries(Game.inventory).map(([id,qty])=>{
+  const cur = UI.invSort || 'default';
+  const entries = sortEntries(Object.entries(Game.inventory).filter(([id,qty])=>Items[id] && qty>0), cur);
+  const rows = entries.map(([id,qty])=>{
     const it = Items[id];
-    if (!it) return '';
     const actions = actionButtons(it, id);
     return `<div class="invtile" data-item="${id}">
       <div class="tile-head">
@@ -631,9 +694,11 @@ function renderInventory(){
     <div class="page">
       <h2>🎒 背包</h2>
       <p class="hint">背包物品用于装备与消耗。『自动装备』开启时，更好的武器/防具会自动穿戴上。</p>
+      ${sortBarHtml(cur, 'data-invsort')}
       <div class="invgrid">${rows}</div>
     </div>`;
   bindInvActions();
+  bindSortBars();
 }
 function actionButtons(it, id){
   let h = '';
@@ -1357,6 +1422,8 @@ function renderStats(){
   const msTotal = (window.Milestones||[]).length;
   const msDone = Object.values(unlocked).filter(Boolean).length;
   const lastOff = s.lastOffline ? s.lastOffline.time : '—';
+  const sessH = (Date.now()-(UI.sessionStart||Date.now()))/3600000;
+  const sessCoin = Game.coins - (UI.sessionCoins??Game.coins);
   el.innerHTML = `
     <div class="page statpage">
       <h2>📊 统计</h2>
@@ -1376,6 +1443,8 @@ function renderStats(){
         <div><b>${msDone}/${msTotal}</b> 里程碑</div>
         <div><b>${buffInfo}</b> 当前增益</div>
         <div><b>${((Date.now()-Game.startedAt)/3600000).toFixed(1)}h</b> 游戏时间</div>
+        <div><b>${sessH.toFixed(1)}h</b> 本次会话</div>
+        <div><b>${sessCoin>=0?'+':'−'}${fmt(Math.abs(sessCoin))}</b> 本次会话金币</div>
         <div><b>${lastOff}</b> 上次离线结算</div>
       </div>
       <h3 class="sec">🏅 里程碑（解锁后永久提供被动加成）</h3>
@@ -1390,6 +1459,8 @@ function renderStats(){
 function confirmReset(){
   if(confirm('确定清空所有进度？此操作不可恢复。')){
     resetToDefault();
+    UI.sessionStart = Date.now();
+    UI.sessionCoins = Game.coins;
     UI.log('存档已重置', 'bad', 'sys');
     renderCurrent(); UI.refreshAll();
   }
@@ -1481,6 +1552,7 @@ function openSettings(){
     <label><input type="checkbox" id="autoEquipChk" ${Game.auto_equip?'checked':''}> 自动装备更好的武器/防具</label>
     <label><input type="checkbox" id="autoBuyToolsChk" ${Game.auto_buy_tools?'checked':''}> 自动购买并装备更好的斧/镐（花金币）</label>
     <label><input type="checkbox" id="autoAttackChk" ${autoAttack?'checked':''}> 自动持续战斗</label>
+    <label><input type="checkbox" id="autoReviveChk" ${Game.auto_revive?'checked':''}> 战斗死亡后自动重开（满血重新挑战同一怪物）</label>
     <button class="btn-mini" onclick="UI.closeModal()">关闭</button>
     <button class="btn-mini" onclick="saveGame();UI.toast('已保存')">保存</button>
   `;
@@ -1495,6 +1567,7 @@ function openSettings(){
   document.getElementById('autoEquipChk').addEventListener('change', e=>{ Game.auto_equip = e.target.checked; saveGame(); });
   document.getElementById('autoBuyToolsChk').addEventListener('change', e=>{ Game.auto_buy_tools = e.target.checked; saveGame(); });
   document.getElementById('autoAttackChk').addEventListener('change', e=>{ autoAttack = e.target.checked; saveGame(); });
+  document.getElementById('autoReviveChk').addEventListener('change', e=>{ Game.auto_revive = e.target.checked; saveGame(); UI.toast(e.target.checked?'已开启死亡自动重开':'已关闭死亡自动重开'); });
   document.getElementById('modal').classList.remove('hidden');
 }
 UI.closeModal = function(){ document.getElementById('modal').classList.add('hidden'); };
@@ -1503,6 +1576,8 @@ UI.openSettings = openSettings;
 // ---------- 初始化 ----------
 function init(){
   loadGame();
+  UI.sessionStart = Date.now();
+  UI.sessionCoins = Game.coins;
   bindTabs();
   bindKeyboardNav();
   document.getElementById('btnSave').addEventListener('click', ()=>{saveGame();UI.toast('已存档');});

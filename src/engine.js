@@ -9,6 +9,7 @@ const Game = {
   autoEatThreshold: 0.35,
   auto_equip: true,
   auto_buy_tools: false,
+  auto_revive: false,     // 战斗死亡后自动重新挑战同一怪物
   lockSlots: {},
   // 进行中的活动
   activity: null,       // { kind:'chop'|'mine'|'fish'|'farm'|'smith'|'craft'|'fletch'|'cook'|'rune'|'combat'|'smithBatch', ...}
@@ -71,7 +72,7 @@ function saveGame() {
   const data = { version:1, coins:Game.coins, banking:Game.banking, inventory:Game.inventory, skills:Game.skills,
     gear:Game.gear, activity:Game.activity||null, combat:Game.combat||null, buff:Game.buff||null, farms:Game.farms,
     stats:Game.stats, startedAt:Game.startedAt, autoEatThreshold:Game.autoEatThreshold,
-    auto_equip:Game.auto_equip, auto_buy_tools:Game.auto_buy_tools, shopBought:Game.shopBought, lockSlots:Game.lockSlots,
+    auto_equip:Game.auto_equip, auto_buy_tools:Game.auto_buy_tools, auto_revive:!!Game.auto_revive, shopBought:Game.shopBought, lockSlots:Game.lockSlots,
     recentLoot:Game.recentLoot||[], queue:Game.queue||[], queueIdx:Game.queueIdx||0, queueRound:Game.queueRound||0,
     queueRunning:!!Game.queueRunning, queueLoop:Game.queueLoop!==false, fallback:Game.fallback||null };
   try { localStorage.setItem(SAVE_KEY, JSON.stringify(data)); }
@@ -101,6 +102,7 @@ function loadGame() {
     Game.autoEatThreshold = d.autoEatThreshold ?? 0.35;
     Game.auto_equip = d.auto_equip ?? true;
     Game.auto_buy_tools = d.auto_buy_tools ?? false;
+    Game.auto_revive = !!d.auto_revive;
     Game.shopBought = d.shopBought || {};
     Game.lockSlots = d.lockSlots || {};
     // 行动队列

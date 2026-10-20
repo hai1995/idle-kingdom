@@ -408,8 +408,20 @@ function onPlayerDeath(c,m){
   Game.stats.deaths++;
   log(`💀 你被 ${m.name} 击败了！`, 'bad', 'combat');
   UI && UI.deathFloat();
+  const lastId = c && c.monsterId;
   Game.combat = null;
   autoAttack = false;
+  // 死亡后自动重开：稍作停顿后满血重新挑战同一怪物
+  if (Game.auto_revive && lastId && Monsters[lastId]){
+    setTimeout(()=>{
+      if (!Game.auto_revive) return;
+      startCombat(lastId);
+      if (Game.combat){
+        autoAttack = true;
+        UI && UI.toast(`⚔️ 自动重新挑战 ${Monsters[lastId].name}`);
+      }
+    }, 1500);
+  }
 }
 function playerEl(){ return document.getElementById('playerFighter'); }
 function monsterEl(){ return document.getElementById('monsterFighter'); }

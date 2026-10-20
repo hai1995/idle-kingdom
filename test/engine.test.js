@@ -367,6 +367,23 @@ try{
   assert(ST.Game.combat===null, '玩家死亡后战斗结束');
   assert(ST.Game.stats.deaths === deathsBefore+1, `单次死亡只计数一次 ${deathsBefore} -> ${ST.Game.stats.deaths}`);
 
+  // 11j. 死亡后自动重开：开关默认关闭；开启后死亡会安排重开（setTimeout 在无头环境为 no-op，不真正开战）
+  assert(ST.Game.auto_revive === false, '自动重开默认关闭');
+  ST.Game.auto_revive = true;
+  G.startCombat('dragon');
+  assert(!!ST.Game.combat, '自动重开测试可挑战红龙');
+  ST.Game.combat.playerHp = 1;
+  G.combatTick(10);
+  assert(ST.Game.combat===null, '开启自动重开后死亡仍立即结束当前战斗');
+  assert(ST.Game.stats.deaths === deathsBefore+2, '自动重开不吞死亡计数 -> '+ST.Game.stats.deaths);
+  ST.Game.auto_revive = false;
+  // 存档往返：auto_revive 持久化
+  ST.Game.auto_revive = false;
+  G.saveGame();
+  ST.Game.auto_revive = true;   // 弄脏后再读档，验证从存档恢复
+  G.loadGame();
+  assert(ST.Game.auto_revive === false, 'auto_revive 存档往返正确');
+
   console.log('PASS: 修复验证（炼药活动/仓储交互/箭矢消耗/近战回退/战斗进食/经验倍率/离线农牧/自动装箭/单次死亡）');
 }catch(e){
   console.error('FAIL: 修复验证: '+e.message); console.error(e.stack); process.exitCode=1;
@@ -796,6 +813,12 @@ try{
 
   // DPS 估算
   assert(G.dpsEstimate() > 0, 'DPS 估算为正 -> '+G.dpsEstimate());
+
+  // 预估掉落价值
+  const lv1 = G.monsterLootValue(ST.Monsters['wolf']);
+  assert(lv1 > 0, '怪物卡片给出预估掉落价值 -> '+lv1);
+  const lv2 = G.monsterLootValue(ST.Monsters['dragon']);
+  assert(lv2 > lv1, '高阶怪物预估价值更高 -> '+lv1+' -> '+lv2);
 
   // 战利品记录
   const loot0 = (ST.Game.recentLoot||[]).length;
