@@ -572,7 +572,20 @@ try{
   G.buyItem('seed_snapdragon', 220, 1, 40);
   assert(ST.totalOf('seed_snapdragon') >= 1, '等级达标后可购买 -> '+ST.totalOf('seed_snapdragon'));
 
-  console.log('PASS: 商店改造（分类/无套利/一键出售/交易统计/等级门槛）通过');
+  // 15f. 批量购买：×10 / 最大（合并结算）
+  ST.Game.skills.herblore.level = 50;
+  ST.Game.coins = 1000;
+  const vialCost = 30, vialQty = 10;
+  G.buyItem('vial_water', vialCost, vialQty, 1, true);   // silent 单次
+  assert(ST.Game.coins === 970, 'silent 购买扣除金币但不提示 -> '+ST.Game.coins);
+  for (let i=0;i<9 && ST.Game.coins>=vialCost;i++) G.buyItem('vial_water', vialCost, vialQty, 1, true);
+  assert(ST.Game.coins === 700, '×10 批量后金币正确 -> '+ST.Game.coins);
+  const maxTimes = Math.floor(700/vialCost);
+  for (let i=0;i<maxTimes;i++) G.buyItem('vial_water', vialCost, vialQty, 1, true);
+  assert(ST.Game.coins === 700 - maxTimes*vialCost, '最大批量按金币买满 -> '+ST.Game.coins);
+  assert((ST.Game.stats.purchases||0) >= 10, '批量购买计入交易笔数 -> '+ST.Game.stats.purchases);
+
+  console.log('PASS: 商店改造（分类/无套利/一键出售/交易统计/等级门槛/批量购买）通过');
 }catch(e){
   console.error('FAIL: 商店改造: '+e.message); console.error(e.stack); process.exitCode=1;
 }

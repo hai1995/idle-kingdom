@@ -887,6 +887,8 @@ function renderShop(){
         <div class="tile-sub">${sub}</div>
         <div class="tile-acts">
           <button class="mini" data-buy="${s.itemId}|${s.cost}|${s.qty}|${s.lvl||0}">购买</button>
+          ${state.ok?`<button class="mini ghost" data-buy10="${s.itemId}|${s.cost}|${s.qty}|${s.lvl||0}" title="一次购买 10 份">×10</button>
+          <button class="mini ghost" data-buymax="${s.itemId}|${s.cost}|${s.qty}|${s.lvl||0}" title="按当前金币买满">最大</button>`:''}
           ${state.ok?'':`<span class="stage">${state.reason}</span>`}
         </div>
       </div>`;
@@ -945,6 +947,32 @@ function renderShop(){
     buyItem(id, parseInt(cost), parseInt(qty), parseInt(lvl)||0);
     renderShop();
   }));
+  // 批量购买：×10 / 最大（合并结算，只提示一次）
+  const batchBuy = (sel, key, fixed)=>{
+    document.querySelectorAll(sel).forEach(b=>b.addEventListener('click', ()=>{
+      const [id,cost,qty,lvl] = b.dataset[key].split('|');
+      const unit = parseInt(cost);
+      let times = fixed || Math.floor(Game.coins/unit);
+      times = Math.max(0, Math.min(999, times));
+      if (times<=0){ UI.toast('金币不足'); return; }
+      let spent = 0, got = 0, bought = 0;
+      for (let i=0;i<times && Game.coins>=unit;i++){
+        const before = Game.coins;
+        buyItem(id, unit, parseInt(qty), parseInt(lvl)||0, true);
+        if (Game.coins === before) break;   // 等级不足等失败情况立即停止
+        spent += unit; got += parseInt(qty); bought++;
+      }
+      if (!bought) return;
+      saveGame();
+      UI.coinFloat(-spent);
+      const it = Items[id];
+      UI.toast(`已购买 ${it.name} ×${got}（${bought} 份）`);
+      log(`🛒 批量购买 ${it.name} ×${got}，花费 ${spent} 金币`, 'gold', 'trade');
+      renderShop();
+    }));
+  };
+  batchBuy('[data-buy10]', 'buy10', 10);
+  batchBuy('[data-buymax]', 'buymax', 0);
   document.querySelectorAll('[data-sell]').forEach(b=>b.addEventListener('click', ()=>{
     sellAll(b.dataset.sell);
     renderShop();
@@ -979,16 +1007,17 @@ function skillNameForShop(itemId){
   if (it.type==='potion' || it.type==='potion_boost') return '炼药';
   return '等级';
 }
-function buyItem(itemId, cost, qty, reqLvl){
+function buyItem(itemId, cost, qty, reqLvl, silent){
   const it = Items[itemId];
   if (!it) return;
-  if (Game.coins < cost){ UI.toast('金币不足'); return; }
+  if (Game.coins < cost){ if(!silent) UI.toast('金币不足'); return; }
   const need = Math.max(reqLvl||0, it.lvl||0);
-  if (need > levelOfForShop(itemId)){ UI.toast(`🔒 需要 ${skillNameForShop(itemId)} ${need} 级`); return; }
+  if (need > levelOfForShop(itemId)){ if(!silent) UI.toast(`🔒 需要 ${skillNameForShop(itemId)} ${need} 级`); return; }
   Game.coins -= cost;
   Game.stats.purchases = (Game.stats.purchases||0) + 1;
   Game.stats.spent = (Game.stats.spent||0) + cost;
   giveItem(itemId, qty, false);
+  if (silent) return;   // 批量购买时由调用方合并结算提示
   saveGame();
   UI.coinFloat(-cost);
   UI.toast(`已购买 ${it.name} ×${qty}`);

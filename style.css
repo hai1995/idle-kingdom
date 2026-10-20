@@ -316,6 +316,8 @@ h3.sec.span{ grid-column:1/-1; margin-top:6px; }
 .icount{ color:var(--muted); min-width:60px; }
 .iacts{ display:flex; gap:4px; }
 .mini{ background:var(--panel2); color:var(--text); border:1px solid var(--border); padding:4px 8px; border-radius:6px; cursor:pointer; font-size:12px; }
+.mini.ghost{ background:transparent; color:var(--muted); }
+.mini.ghost:hover{ color:var(--accent); border-color:var(--accent); }
 .mini:hover{ background:#2b364c; }
 .mini.red:hover{ background:#5a1c1c; }
 .mini.tiny{ padding:2px 6px; font-size:11px; }
