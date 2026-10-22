@@ -34,6 +34,8 @@ body{
 /* --statusbar-h 由 JS 按底部动作条实测高度回填，避免悬浮条遮挡内容末尾 */
 #app{ max-width:1440px; margin:0 auto; padding:0 12px calc(var(--statusbar-h,56px) + 20px); display:flex; flex-direction:column; min-height:100vh; }
 .hidden{ display:none !important; }
+/* 触控友好：去除点按高亮、禁用双击缩放延迟、避免误选文字 */
+button,.tab,.chip-btn,.icon-btn,.btn-mini{ -webkit-tap-highlight-color:transparent; touch-action:manipulation; user-select:none; }
 .hint{ color:var(--ink-60); font-size:12px; }
 
 /* ---------- 顶栏 + 导航（吸顶） ---------- */
@@ -407,16 +409,16 @@ body{
 }
 @media (max-width:720px){
   #app{ padding:0 8px calc(var(--statusbar-h,56px) + 14px); }
-  /* 窄屏动作条收紧，尽量压成一行 */
-  #statusbar{ gap:8px; font-size:12px; padding-top:7px; padding-bottom:calc(7px + env(safe-area-inset-bottom, 0px)); }
-  #actionProg{ min-width:80px; }
-  /* 顶栏收紧：统计只留单字标签，尽量压成一行，减少吸顶占位 */
-  #topbar{ padding:6px 10px; margin-bottom:6px; }
-  #topbar .left{ gap:9px; }
-  #topbar .stat{ font-size:12px; }
+  /* 顶栏：单行紧凑，统计区可横向滚动，避免吸顶时占掉多行高度 */
+  #topbar{ padding:6px 10px; margin-bottom:6px; flex-wrap:nowrap; gap:8px; }
+  #topbar .left{ flex-wrap:nowrap; gap:9px; overflow-x:auto; scrollbar-width:none; -ms-overflow-style:none; -webkit-overflow-scrolling:touch; }
+  #topbar .left::-webkit-scrollbar{ display:none; }
+  #topbar .right{ flex:0 0 auto; }
+  #topbar .title{ font-size:15px; flex:0 0 auto; }
+  #topbar .stat{ font-size:12px; white-space:nowrap; }
   #topbar .stat .lb{ display:none; }
   #topbar .stat[data-s]::before{ content:attr(data-s); font-size:11px; opacity:.7; margin-right:3px; }
-  /* 页签改单行横向滑动，避免吸顶时占掉多行高度 */
+  /* 页签：单行横向滑动，避免吸顶占多行 */
   #tabs{ flex-wrap:nowrap; overflow-x:auto; overflow-y:hidden; margin-bottom:10px; scrollbar-width:none; -ms-overflow-style:none; -webkit-overflow-scrolling:touch; }
   #tabs::-webkit-scrollbar{ display:none; }
   .tab{ flex:0 0 auto; }
@@ -428,14 +430,30 @@ body{
   .farm-grid,.codex-grid,.mini-grid,.shop-grid,.sell-grid,.inv-grid,.gear-grid,.omen-grid,.rite-grid,.stat-grid{
     grid-template-columns:repeat(auto-fill,minmax(min(150px,100%),1fr));
   }
-  #topbar .title{ font-size:15px; }
-  .tab{ padding:6px 9px; font-size:13px; }
+  /* 状态栏：活动文本可收缩省略，避免把动作条挤成多行 */
+  #statusbar{ gap:8px; font-size:12px; padding-top:7px; padding-bottom:calc(7px + env(safe-area-inset-bottom, 0px)); }
+  #actionProg{ min-width:70px; }
+  #activityText{ flex:1 1 auto; min-width:0; overflow:hidden; text-overflow:ellipsis; white-space:nowrap; }
+  /* 提示移到底部状态条之上，避开吸顶顶栏（手机顶栏较高） */
+  #toasts{ top:auto; bottom:calc(var(--statusbar-h,56px) + 12px); }
+  /* 触控友好：放大点按目标，不改变块级布局（按钮默认垂直居中内容） */
+  .btn,.chip-btn,.tab{ min-height:38px; padding:9px 14px; }
+  .btn.small{ padding:6px 11px; min-height:34px; }
+  .chip-btn{ padding:6px 12px; }
+  .tab{ padding:9px 11px; font-size:13px; }
+  .region-item,.node-item,.codex-card,.inv-card{ min-height:42px; }
+  .slot{ min-height:92px; }
+  .panel{ padding:10px 12px; }
+}
+@media (max-width:480px){
+  #topbar .stat[data-s="高"]{ display:none; }              /* 最高技能：小屏隐藏减负 */
+  #modalBox{ max-width:calc(100vw - 28px); padding:14px; }
+  .toast{ max-width:calc(100vw - 28px); }
 }
 @media (max-width:400px){
-  #topbar .stat.opt{ display:none; }
+  #topbar .stat.opt{ display:none; }                       /* 征兆：极窄屏再隐藏 */
   #topbar .title{ font-size:14px; letter-spacing:1px; }
   #topbar .title small{ display:none; }
-  .toast{ max-width:calc(100vw - 28px); }
 }
 @media (prefers-reduced-motion:reduce){
   *{ animation-duration:.01s !important; transition-duration:.01s !important; }

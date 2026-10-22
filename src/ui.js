@@ -160,6 +160,30 @@ const UI = {
     const interval = currentActionInterval();
     const pct = Math.min(100, activityProgress / interval * 100);
     fill.style.width = pct.toFixed(1) + '%';
+    this.refreshCombatHud();
+  },
+  // 战斗中每帧就地刷新竞技场血量条/数值（不重渲染整个面板，避免滚动复位）
+  refreshCombatHud(){
+    const c = Game.combat;
+    const hp = $('hpDisplay');
+    if (!c){
+      if (this._combatActive){ this._combatActive = false; if (this.currentTab === 'taofa') this.renderTaofa(); }
+      if (hp) hp.innerHTML = `❤️ <b>${playerMaxHp()}</b>/${playerMaxHp()}`;
+      return;
+    }
+    this._combatActive = true;
+    if (hp) hp.innerHTML = `❤️ <b>${Math.max(0, Math.ceil(c.playerHp))}</b>/${playerMaxHp()}`;
+    if (this.currentTab !== 'taofa') return;
+    const m = Monsters[c.monsterId];
+    if (!m) return;
+    const pf = playerEl() && playerEl().querySelector('.f-hp .fill');
+    if (pf) pf.style.width = Math.max(0, c.playerHp / playerMaxHp() * 100) + '%';
+    const mf = monsterEl() && monsterEl().querySelector('.f-hp .fill');
+    if (mf) mf.style.width = Math.max(0, c.monsterHp / m.hp * 100) + '%';
+    const ms = monsterEl() && monsterEl().querySelector('.f-sub');
+    if (ms) ms.textContent = fmt(Math.max(0, c.monsterHp)) + ' / ' + fmt(m.hp);
+    const cs = $('combatStats');
+    if (cs) cs.textContent = `回合 ${c.round||0} · 造成 ${c.dmgOut||0} · 承伤 ${c.dmgIn||0}`;
   },
   refreshActivity(){
     const t = $('activityText');
@@ -554,7 +578,7 @@ UI.renderTaofa = function(){
         <div class="f-sub">${fmt(Math.max(0,c.monsterHp))} / ${fmt(m.hp)}</div>`:`<div class="f-name">待机</div><div class="f-sub">择一异兽往讨</div>`}
       </div>
     </div>
-    ${c?`<div class="combat-stats">回合 ${c.round||0} · 造成 ${c.dmgOut||0} · 承伤 ${c.dmgIn||0}</div>`:''}
+    ${c?`<div class="combat-stats" id="combatStats">回合 ${c.round||0} · 造成 ${c.dmgOut||0} · 承伤 ${c.dmgIn||0}</div>`:''}
     <div class="attr-row">
       <span>气血 <b>${playerMaxHp()}</b></span>
       <span>防御 <b>${totalDefence().toFixed(1)}</b></span>
@@ -1081,8 +1105,8 @@ UI.renderStats = function(){
     <div class="panel stat-panel"><h3>著录</h3>
       <div class="stat-rows">
         <span>已录 <b>${recordedCount()}/${Object.keys(CODEX).length}</b></span>
-        <span>山已涉 <b>${Object.keys(Game.map).length}/39</b></span>
-        <span>观象处 <b>${Object.values(Game.observed).filter(Boolean).length}/5</b></span>
+        <span>山已涉 <b>${Object.keys(Game.map).length}/${WORLD.regions.reduce((s,r)=>s+r.nodes.length,0)}</b></span>
+        <span>观象处 <b>${Object.values(Game.observed).filter(Boolean).length}/${Object.keys(OBSERVE_SITES).length}</b></span>
         <span>营造 <b>${Object.keys(Game.buildings).length}/${Object.keys(BUILDINGS).length}</b></span>
       </div></div>
     <div class="panel stat-panel"><h3>长线成就</h3>

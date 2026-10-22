@@ -818,12 +818,32 @@ const OBSERVE_SITES = {
   zhonggu:  { nodeId:'nanshan-3-10', kind:'观象', name:'条风',   desc:'其南有谷焉，曰中谷，条风自是出',           gain:'离线上限 +1 小时' },
   danxue:   { nodeId:'nanshan-3-03', kind:'观瑞', name:'凤皇',   desc:'丹穴之山有鸟焉，五采而文，见则天下安宁',   gain:'触发「天下安宁」吉兆' },
   nanyu:    { nodeId:'nanshan-3-13', kind:'观瑞', name:'鹓雏',   desc:'南禺之山有凤皇、鹓雏',                     gain:'触发「天下安宁」吉兆' },
-  // 东山经观象点（4 处；本经「X望Y」方位句即天然观象点，且为全经神话密度最高处）
-  ds_kongsang:{ nodeId:'dongshan-2-01', kind:'观象', name:'四望', desc:'北临食水，东望沮吴，南望沙陵，西望湣泽——本经唯一四向俱全之山，宜作观象台', gain:'离线上限 +1 小时' },
-  ds_shihu:   { nodeId:'dongshan-3-01', kind:'观象', name:'北望𦍲山', desc:'北望𦍲山，东次三经水路链之起点，兼作航行定位锚点', gain:'离线上限 +1 小时' },
-  ds_yishan:  { nodeId:'dongshan-2-17', kind:'观象', name:'东望湖泽', desc:'南临䃌水，东望湖泽，本系末山，两条征兆（峳峳、絜钩）同在此', gain:'离线上限 +1 小时' },
-  ds_wugao:   { nodeId:'dongshan-3-09', kind:'观象', name:'东望榑木', desc:'南望幼海，东望榑木（扶桑）——全经神话密度最高，然多风，宜高难观测', gain:'离线上限 +1 小时' },
 };
+
+// 东山经观象点：据 node.observation 数据驱动接入（全经 4 座「X望Y」方位山，非手填）
+(function buildDongshanObserve(){
+  if (typeof DONGSHAN === 'undefined') return;
+  const fmtDir = o => {
+    const parts = [];
+    if (o.临 && o.临.length) parts.push(o.临.join('，'));
+    if (o.望 && o.望.length) parts.push(o.望.join('，'));
+    return parts.join('，');
+  };
+  for (const region of DONGSHAN.regions) {
+    for (const node of region.nodes) {
+      const obs = node.observation;
+      if (!obs || obs.type !== '观象点') continue;
+      const key = 'ds_' + node.id.replace(/[^a-zA-Z0-9]/g, '_');
+      OBSERVE_SITES[key] = {
+        nodeId: node.id,
+        kind: '观象',
+        name: node.name,
+        desc: `${node.name}：${fmtDir(obs)}（${obs.rank || ''}）——${obs.note || ''}`,
+        gain: '离线上限 +1 小时',
+      };
+    }
+  }
+})();
 
 // ---------- 养成（长周期） ----------
 // 原文自带的两处长周期：峚山丹木五岁、北山器酸三岁；外加发鸠山精卫填海（行为类无限长线）。
