@@ -1,151 +1,152 @@
-// ===== 游戏核心引擎 —— 状态、计时、存档 =====
+// ===== 游戏核心引擎：状态、存档、经验曲线、著录度 =====
 
 const Game = {
-  coins: 0,             // 金币
-  banking: {},          // 物品数量 { itemId: qty }
-  inventory: {},        // 背包 { itemId: qty }
-  skills: {},           // { skillId: { level, xp } }
-  gear: { axe:null, pickaxe:null, rod:null, weapon:null, bow:null, magic:null, arrow:null, helm:null, body:null, legs:null, boots:null, ring:null, amulet:null, healthPot:null },
-  stylePref: 'auto',    // 战斗风格偏好：'auto' | 'attack' | 'ranged' | 'magic'
-  fxLevel: 'full',      // 动效强度：'full' 完整演出 | 'light' 仅飘字 | 'off' 关闭
-  autoEatThreshold: 0.35,
-  auto_equip: true,
-  auto_buy_tools: false,
-  auto_revive: false,     // 战斗死亡后自动重新挑战同一怪物
-  lockSlots: {},
-  // 进行中的活动
-  activity: null,       // { kind:'chop'|'mine'|'fish'|'farm'|'smith'|'craft'|'fletch'|'cook'|'rune'|'combat'|'smithBatch', ...}
-  combat: null,         // { monsterId, playerHp, ... }
-  buff: null,           // 当前生效的药水 buff：{ type, remaining, dur, kind }
-  farms: {},            // { slotId: { seedId, remain, ts } }
-  recentLoot: [],       // 最近战利品 [{ itemId, qty }]（战斗页展示）
-  queue: [],            // 行动队列 [{ id, kind, target, qty, done }]
-  queueIdx: 0,          // 当前执行到的队列下标
-  queueRound: 0,        // 已完成的轮次
-  queueRunning: false,  // 队列是否运行中
-  queueLoop: true,      // 队列是否循环执行
-  fallback: null,       // 兜底动作 { kind, target, qty }
-  stats: { kills:0, deaths:0, actions:0, totalXp:0, time:0, bossKills:0, totalEarned:0, potions:0, harvests:0,
-           purchases:0, sales:0, spent:0, sold:0, seenMilestones:{}, damageDealt:0, damageTaken:0, hits:0 },
-  shopBought: {},
+  shells: 50,            // 贝币（商旅之用）
+  banking: {},           // 仓廪 { itemId: qty }
+  inventory: {},         // 行囊 { itemId: qty }
+  skills: {},            // { skillId: { level, xp } }
+  gear: { weapon:null, armor:null, charm:null, axe:null, pick:null, net:null, quiver:null },
+  records: {},           // 著录 { objId: { count, tier } }
+  map: {},               // 已解锁/到访节点 { nodeId: true }
+  observed: {},          // 已完成观象 { siteId: true }
+  buildings: {},         // 已营造 { buildingId: true }
+  deployed: {},          // 御使槽位 { slotIdx: beastId }
+  omens: [],             // 生效中的征兆 [{ id, until }]
+  rites: {},             // 区域祠礼增益 { regionId: untilGameTime }
+  recentLoot: [],        // 最近战利品 [{ itemId, qty }]
+  omenImmune: {},        // 征兆免疫 { omenId: true }（鵕鸟/大鹗所赐，或御使駮）
+  danmu: { stage:0, done:0 },  // 峚山丹木养成进度
+  grow: {},               // 各养成点进度 { siteId: { stage, done } }（峚山别名 danmu）
+  buff: null,            // 饮药之益 { itemId, def, remaining, dur }
+  farms: {},             // 圃艺田地 { 'p0'..: { seedId, remain, grow } }
+  node: 'nanshan-1-01',  // 当前所在节点
+  activity: null,        // { kind:'gather'|'craft'|'observe'|'taofa', ... }
+  combat: null,
+  queue: [], queueIdx: 0, queueRound: 0, queueRunning: false, queueLoop: true, fallback: null,
+  stats: {
+    kills:0, deaths:0, actions:0, totalXp:0, time:0, bossKills:{}, totalEarned:0,
+    harvests:0, purchases:0, sales:0, spent:0, sold:0, gathers:{}, crafts:0,
+    damageDealt:0, damageTaken:0, hits:0, omens:{}, rites:0, observes:0, divines:0,
+    seenMilestones:{},
+  },
   startedAt: Date.now(),
-  version: 1,
+  version: 2,
+};
+const SAVE_KEY = 'shj_zhulu_save_v1';
+
+// 偏好设置（不进 Game 主体，避免与存档字段冲突）
+const Prefs = {
+  fxLevel: 'full',       // 动效强度：full | light | off
+  stylePref: 'auto',     // 战斗风格偏好：auto | attack | ranged | zhu
+  autoEat: 0.35,         // 自动进食阈值
+  autoRevive: false,     // 战败后自动重新讨伐同一异兽
+  autoEquip: true,       // 自动装备更优
+  zhuEl: '火',           // 祝术主五行
 };
 
-// ---------- 存档 ----------
-const SAVE_KEY = 'melvor_idle_save_v1';
-
-function cloneDefaultGame() {
+function cloneDefaultGame(){
   const g = JSON.parse(JSON.stringify(Game));
   g.startedAt = Date.now();
-  g.coins = 300; // 初始金币
-  // 初始：短弓、青铜剑、治疗药水、一些箭、新手工具
-  g.inventory = {
-    bronze_axe: 1, bronze_pick: 1, bronze_rod: 1, shortbow: 1, arrow_bronze: 20,
-    health_pot: 3, raw_shrimp: 5, normal_log: 5,
-    vial_water: 3, seed_guam: 2,
-  };
-  g.banking = {};
-  g.farms = {};
-  g.buff = null;
-  // 重置存档时统计也要归零（否则会继承旧存档的累计数据）
-  g.stats = { kills:0, deaths:0, actions:0, totalXp:0, time:0, bossKills:0, totalEarned:0, potions:0, harvests:0,
-              purchases:0, sales:0, spent:0, sold:0, seenMilestones:{}, damageDealt:0, damageTaken:0, hits:0 };
-  delete g.stats.lastOffline;
-  g.recentLoot = [];
-  g.queue = [];
-  g.queueIdx = 0;
-  g.queueRound = 0;
-  g.queueRunning = false;
-  g.queueLoop = true;
-  g.fallback = null;
-  g.stylePref = 'auto';
-  g.fxLevel = 'full';
-  g.skills = {
-    woodcutting:{level:1,xp:0}, mining:{level:1,xp:0}, fishing:{level:1,xp:0},
-    farming:{level:1,xp:0}, smithing:{level:1,xp:0}, crafting:{level:1,xp:0},
-    fletching:{level:1,xp:0}, cooking:{level:1,xp:0}, runecrafting:{level:1,xp:0}, herblore:{level:1,xp:0},
-    combat:{level:1,xp:0}, attack:{level:1,xp:0}, strength:{level:1,xp:0},
-    defence:{level:1,xp:0}, ranged:{level:1,xp:0}, magic:{level:1,xp:0},
-  };
+  g.shells = 50;
+  // 受命之初的行装：樵采石器、些许材料与粮种
+  g.inventory = { gui:5, shashi:5, guaimu:3, jing:3, zhuyu:3, tu:5, jiagufan:2, shuiping:2 };
+  g.banking = {}; g.farms = {}; g.records = {}; g.map = { 'nanshan-1-01': true };
+  g.observed = {}; g.buildings = {}; g.deployed = {}; g.omens = []; g.rites = {}; g.recentLoot = [];
+  g.omenImmune = {}; g.danmu = { stage:0, done:0 }; g.grow = {}; g.buff = null;
+  g.node = 'nanshan-1-01'; g.activity = null; g.combat = null;
+  g.queue = []; g.queueIdx = 0; g.queueRound = 0; g.queueRunning = false; g.queueLoop = true; g.fallback = null;
+  g.skills = {};
+  for (const id of ALL_SKILL_IDS) g.skills[id] = { level:1, xp:0 };
+  g.stats = { kills:0, deaths:0, actions:0, totalXp:0, time:0, bossKills:{}, totalEarned:0,
+              harvests:0, purchases:0, sales:0, spent:0, sold:0, gathers:{}, crafts:0,
+              damageDealt:0, damageTaken:0, hits:0, omens:{}, rites:0, observes:0, divines:0,
+              seenMilestones:{} };
   return g;
 }
 
-function saveGame() {
+// ---------- 存档 ----------
+function saveGame(){
   Game.skills = Game.skills || {};
-  const data = { version:1, coins:Game.coins, banking:Game.banking, inventory:Game.inventory, skills:Game.skills,
-    gear:Game.gear, activity:Game.activity||null, combat:Game.combat||null, buff:Game.buff||null, farms:Game.farms,
-    stats:Game.stats, startedAt:Game.startedAt, autoEatThreshold:Game.autoEatThreshold,
-    auto_equip:Game.auto_equip, auto_buy_tools:Game.auto_buy_tools, auto_revive:!!Game.auto_revive, shopBought:Game.shopBought, lockSlots:Game.lockSlots,
-    recentLoot:Game.recentLoot||[], queue:Game.queue||[], queueIdx:Game.queueIdx||0, queueRound:Game.queueRound||0,
-    queueRunning:!!Game.queueRunning, queueLoop:Game.queueLoop!==false, fallback:Game.fallback||null,
-    stylePref:Game.stylePref||'auto',
-    fxLevel:(Game.fxLevel==='light'||Game.fxLevel==='off')?Game.fxLevel:'full' };
+  const data = { version:2, shells:Game.shells, banking:Game.banking, inventory:Game.inventory,
+    skills:Game.skills, gear:Game.gear, records:Game.records, map:Game.map, observed:Game.observed,
+    buildings:Game.buildings, deployed:Game.deployed, omens:Game.omens, rites:Game.rites, recentLoot:Game.recentLoot||[],
+    omenImmune:Game.omenImmune||{}, danmu:Game.danmu||{stage:0,done:0}, grow:Game.grow||{}, buff:Game.buff,
+    farms:Game.farms, node:Game.node, activity:Game.activity||null, combat:Game.combat||null,
+    stats:Game.stats, startedAt:Game.startedAt, prefs:Prefs,
+    queue:Game.queue||[], queueIdx:Game.queueIdx||0, queueRound:Game.queueRound||0,
+    queueRunning:!!Game.queueRunning, queueLoop:Game.queueLoop!==false, fallback:Game.fallback||null };
   try { localStorage.setItem(SAVE_KEY, JSON.stringify(data)); }
   catch(e){ console.error('保存失败', e); }
-  // 记录保存时间戳，用于计算离线时长
   try { localStorage.setItem(SAVE_KEY+'_time', String(Date.now())); } catch(e){}
 }
 
-function loadGame() {
+function loadGame(){
   let raw;
-  try { raw = localStorage.getItem(SAVE_KEY); } catch(e){ raw=null; }
-  if (!raw) { resetToDefault(); return; }
+  try { raw = localStorage.getItem(SAVE_KEY); } catch(e){ raw = null; }
+  if (!raw){ resetToDefault(); return; }
   try {
     const d = JSON.parse(raw);
+    const dflt = cloneDefaultGame();
     Game.banking = d.banking || {};
     Game.inventory = d.inventory || {};
-    Game.skills = d.skills || cloneDefaultGame().skills;
-    Game.gear = d.gear || {};
+    Game.skills = d.skills || dflt.skills;
+    Game.gear = Object.assign({}, dflt.gear, d.gear || {});
+    Game.records = d.records || {};
+    Game.map = d.map || { 'nanshan-1-01': true };
+    Game.observed = d.observed || {};
+    Game.buildings = d.buildings || {};
+    Game.deployed = d.deployed || {};
+    Game.omens = Array.isArray(d.omens) ? d.omens : [];
+  Game.rites = d.rites || {};
+  Game.recentLoot = Array.isArray(d.recentLoot) ? d.recentLoot : [];
+  Game.omenImmune = d.omenImmune || {};
+  Game.danmu = d.danmu || { stage:0, done:0 };
+  Game.grow = d.grow || {};
+    Game.buff = d.buff || null;
+    Game.farms = d.farms || {};
+    Game.node = d.node || 'nanshan-1-01';
+    Game.shells = isFinite(d.shells) ? d.shells : 50;
+    Game.stats = Object.assign({}, dflt.stats, d.stats || {});
     Game.activity = d.activity || null;
     Game.combat = d.combat || null;
-    Game.farms = d.farms || {};
-    Game.coins = isFinite(d.coins) ? d.coins : 300;
-    Game.stats = Object.assign({kills:0,deaths:0,actions:0,totalXp:0,time:0,bossKills:0,totalEarned:0,potions:0,harvests:0,
-                                 purchases:0,sales:0,spent:0,sold:0,seenMilestones:{},damageDealt:0,damageTaken:0,hits:0}, d.stats||{});
-    Game.buff = d.buff || null;
     Game.startedAt = d.startedAt || Date.now();
-    Game.autoEatThreshold = d.autoEatThreshold ?? 0.35;
-    Game.auto_equip = d.auto_equip ?? true;
-    Game.auto_buy_tools = d.auto_buy_tools ?? false;
-    Game.auto_revive = !!d.auto_revive;
-    Game.shopBought = d.shopBought || {};
-    Game.lockSlots = d.lockSlots || {};
+    if (d.prefs) Object.assign(Prefs, d.prefs);
     // 行动队列
-    Game.recentLoot = Array.isArray(d.recentLoot) ? d.recentLoot : [];
     Game.queue = Array.isArray(d.queue) ? d.queue.filter(e=>e&&e.kind&&e.target) : [];
     Game.queueIdx = d.queueIdx||0;
     Game.queueRound = d.queueRound||0;
     Game.queueRunning = !!d.queueRunning;
     Game.queueLoop = d.queueLoop !== false;
     Game.fallback = (d.fallback && d.fallback.kind && d.fallback.target) ? d.fallback : null;
-    Game.stylePref = (d.stylePref==='attack'||d.stylePref==='ranged'||d.stylePref==='magic') ? d.stylePref : 'auto';
-    Game.fxLevel   = (d.fxLevel==='light'||d.fxLevel==='off') ? d.fxLevel : 'full';
-    // 首次读档：静默记录已解锁的里程碑，避免历史存档一次性弹出大量提示
+    // 首次读档：静默记录已达成里程碑
     if (!Game.stats.seenMilestones || typeof Game.stats.seenMilestones !== 'object'){
       Game.stats.seenMilestones = {};
       (window.Milestones||[]).forEach(ms=>{ if (ms.check && ms.check()) Game.stats.seenMilestones[ms.id] = true; });
     }
-    // 校正技能对象完整
-    const dflt = cloneDefaultGame().skills;
-    for (const k in dflt) if (typeof Game.skills[k] !== 'object') Game.skills[k] = {level:1,xp:0};
-    sanitizeBag(Game.inventory);
-    sanitizeBag(Game.banking);
-    // 校正农田数据（旧存档可能缺 grow）
+    // 校正技能完整
+    for (const k in dflt.skills) if (typeof Game.skills[k] !== 'object') Game.skills[k] = { level:1, xp:0 };
+    sanitizeBag(Game.inventory); sanitizeBag(Game.banking);
+    // 校正田地
     for (const slot in Game.farms){
       const f = Game.farms[slot];
-      if (!f || !f.seedId || !Items[f.seedId]) { delete Game.farms[slot]; continue; }
+      if (!f || !f.seedId || !Items[f.seedId]){ delete Game.farms[slot]; continue; }
       if (!isFinite(f.remain) || f.remain < 0) f.remain = 0;
       if (!isFinite(f.grow) || f.grow <= 0) f.grow = Items[f.seedId].grow || 10;
     }
-  } catch(e) {
+    // 校正装备引用（物品 id 必须仍存在）
+    for (const slot in Game.gear){
+      const g = Game.gear[slot];
+      if (g && !Items[g.id]) Game.gear[slot] = null;
+    }
+    // 校正御使槽位
+    for (const k in Game.deployed){ if (!Monsters[Game.deployed[k]]) delete Game.deployed[k]; }
+  } catch(e){
     console.error('读档失败，恢复默认', e);
     resetToDefault();
   }
   return true;
 }
 
-// 清理背包/仓库中的非法数量（修复旧存档或异常导致的负数/NaN）
 function sanitizeBag(bag){
   for (const k in bag){
     const v = bag[k];
@@ -155,7 +156,6 @@ function sanitizeBag(bag){
 }
 
 // ---------- 存档导出 / 导入 ----------
-// 纯 localStorage 的游戏，清缓存 / 换设备会丢进度，因此提供文本形式的备份与恢复。
 function exportSaveText(){
   try { return localStorage.getItem(SAVE_KEY) || ''; } catch(e){ return ''; }
 }
@@ -164,30 +164,33 @@ function importSaveText(raw){
   let d;
   try { d = JSON.parse(raw); } catch(e){ return { ok:false, reason:'不是合法的 JSON' }; }
   if (!d || typeof d !== 'object' || Array.isArray(d)) return { ok:false, reason:'格式不是存档对象' };
-  if (!isFinite(d.coins) || typeof d.inventory !== 'object' || typeof d.skills !== 'object'){
-    return { ok:false, reason:'缺少存档字段（coins / inventory / skills）' };
+  if (!isFinite(d.shells) || typeof d.inventory !== 'object' || typeof d.skills !== 'object'){
+    return { ok:false, reason:'缺少存档字段（shells / inventory / skills）' };
   }
   try { localStorage.setItem(SAVE_KEY, JSON.stringify(d)); }
   catch(e){ return { ok:false, reason:'写入本地存储失败' }; }
-  loadGame();                       // 复用读档校正（补 skills / 清理非法数量 / 里程碑）
+  loadGame();
   return { ok:true, reason:'导入成功' };
+}
+
+function resetToDefault(){
+  const g = cloneDefaultGame();
+  Object.assign(Game, g);
+  try {
+    localStorage.removeItem(SAVE_KEY);
+    localStorage.removeItem(SAVE_KEY+'_time');
+  } catch(e){}
 }
 window.exportSaveText = exportSaveText;
 window.importSaveText = importSaveText;
 
-function resetToDefault() {
-  const g = cloneDefaultGame();
-  Object.assign(Game, g);
-  localStorage.removeItem(SAVE_KEY);
-  localStorage.removeItem(SAVE_KEY+'_time');
-}
-
-// ---------- 技能 / XP ----------
-// 从 l 级升到 l+1 级所需经验（平滑曲线）
+// ---------- 技能 / XP（自研曲线：81 级 9 阶） ----------
+// XP(L→L+1) = round( 20·L^2.15 + 10·1.048^L )
 function xpForNextLevel(l){
-  return Math.floor(28 * Math.pow(l, 1/2.4) * 5);
+  const X = TUNING.XP;
+  return Math.round(X.A * Math.pow(l, X.B) + X.C * Math.pow(X.R, l));
 }
-// 到达 level 级所需的累计经验（1 级为 0，与 levelFromXp 的 spent 保持一致）
+// 到达 level 级所需累计经验
 function xpForLevel(level){
   let total = 0;
   for (let l=1; l<level; l++) total += xpForNextLevel(l);
@@ -195,7 +198,7 @@ function xpForLevel(level){
 }
 function levelFromXp(xp){
   let level = 1, spent = 0;
-  for(let l=1; l<200; l++){
+  for (let l=1; l<TUNING.MAX_LEVEL; l++){
     const need = xpForNextLevel(l);
     if (spent + need > xp) break;
     spent += need;
@@ -203,19 +206,58 @@ function levelFromXp(xp){
   }
   return { level, spent };
 }
+// 经验授予。额外耦合：一切修行皆长「舆地」（制图随行）与「履险」（逾山涉水）——
+// 否则仅靠首访给经验，区域解锁等级在真实游玩中永远不可达（116 山的世界必须跑得通）。
+// 舆地 = 本次所得的 10%，履险 = 其中一半；用重入守卫避免递归。
+let _inGainXp = false;
 function gainXp(skillId, amount){
   if (!Game.skills[skillId]) return;
-  // 应用经验倍率（里程碑 / 护符 / 炼药等级）
   const gain = Math.round(amount * (typeof xpMult === 'function' ? xpMult() : 1));
   if (gain <= 0) return;
-  Game.skills[skillId].xp = (Game.skills[skillId].xp||0) + gain;
-  const { level } = levelFromXp(Game.skills[skillId].xp);
-  const old = Game.skills[skillId].level||1;
-  Game.skills[skillId].level = level;
+  const sk = Game.skills[skillId];
+  sk.xp = (sk.xp||0) + gain;
+  const { level } = levelFromXp(sk.xp);
+  const old = sk.level||1;
+  sk.level = Math.min(TUNING.MAX_LEVEL, level);
   Game.stats.totalXp += gain;
-  if (level > old && UI) UI.levelUp(skillId, old, level, gain);
+  if (sk.level > old && UI) UI.levelUp(skillId, old, sk.level, gain);
+  if (!_inGainXp && skillId !== 'yudi'){
+    _inGainXp = true;
+    try {
+      const yGain = Math.max(1, Math.round(gain * 0.10));
+      if (Game.skills.yudi){
+        Game.skills.yudi.xp += yGain;
+        const yl = Math.min(TUNING.MAX_LEVEL, levelFromXp(Game.skills.yudi.xp).level);
+        if (yl > (Game.skills.yudi.level||1)) Game.skills.yudi.level = yl;
+      }
+      if (Game.skills.lvxian){
+        Game.skills.lvxian.xp += Math.max(1, Math.round(yGain * 0.5));
+        Game.skills.lvxian.level = Math.min(TUNING.MAX_LEVEL, levelFromXp(Game.skills.lvxian.xp).level);
+      }
+    } finally { _inGainXp = false; }
+  }
 }
 function levelOf(skillId){ return (Game.skills[skillId]||{}).level || 1; }
+function totalSkillLevel(){
+  let t = 0;
+  for (const id in Game.skills) t += (Game.skills[id].level||1);
+  return t;
+}
+
+// ---------- 著录 ----------
+// 累加一次著录；返回 { first, tierUp, tier }
+function addRecord(objId, n){
+  n = Math.max(1, Math.floor(n||1));
+  let rec = Game.records[objId];
+  if (!rec){ rec = { count:0, tier:0 }; Game.records[objId] = rec; }
+  const first = rec.count === 0;
+  rec.count += n;
+  const newTier = recordTierOf(rec.count);
+  const tierUp = newTier > rec.tier;
+  rec.tier = newTier;
+  return { first, tierUp, tier: newTier };
+}
+window.addRecord = addRecord;
 
 // ---------- 物品 ----------
 function totalOf(itemId){ return (Game.banking[itemId]||0) + (Game.inventory[itemId]||0); }
@@ -229,7 +271,7 @@ function giveItem(itemId, qty, toBank){
 function takeItem(itemId, qty, preferBank){
   qty = Math.floor(qty);
   if (!(qty > 0)) return;
-  if (preferBank) {
+  if (preferBank){
     const b = Game.banking[itemId]||0;
     const used = Math.min(b, qty);
     Game.banking[itemId] = b - used;
@@ -240,51 +282,32 @@ function takeItem(itemId, qty, preferBank){
     Game.inventory[itemId] = inv - used;
     qty -= used;
   }
-  if (qty > 0) {
-    // 从另一侧补
+  if (qty > 0){
     const side = preferBank ? Game.inventory : Game.banking;
     const n = side[itemId]||0;
-    side[itemId] = n-qty;
+    side[itemId] = n - qty;
   }
+  sanitizeBag(Game.inventory); sanitizeBag(Game.banking);
 }
 function canAfford(cost){
-  for (const [id,qty] of cost){
-    if (totalOf(id) < qty) return false;
-  }
+  for (const [id,qty] of cost) if (totalOf(id) < qty) return false;
   return true;
 }
 function payCost(cost){
-  for (const [id,qty] of cost){
-    takeItem(id, qty, false);
-    if ((Game.inventory[id]||0) < 0) { // 允许跨仓库扣
-      const over = Game.inventory[id];
-      Game.inventory[id] = 0;
-      Game.banking[id] = (Game.banking[id]||0) + over;
-    }
-  }
+  for (const [id,qty] of cost) takeItem(id, qty, false);
 }
 
-// ---------- 完成时是否全满经验 ----------
+// ---------- 日志 ----------
 function log(msg, color, cat){
   if (UI && UI.log) UI.log(msg, color, cat);
 }
 
-// 通过模块导出（浏览器全局挂到 window）
 if (typeof window !== 'undefined'){
-  window.Game = Game;
-  window.Items = Items;
-  window.Skills = Skills;
-  window.SkillTreeOrder = SkillTreeOrder;
-  window.Recipes = Recipes;
-  window.Monsters = Monsters;
-  window.ShopStock = ShopStock;
-  window.SHOP_CATS = SHOP_CATS;
-  window.RARITY = RARITY;
-  window.WoodcuttingTrees = WoodcuttingTrees;
-  window.MiningOres = MiningOres;
-  window.FishingSpots = FishingSpots;
-  window.FishingLevels = {};
-  window.xpForLevel = xpForLevel;
-  window.levelFromXp = levelFromXp;
-  window.sanitizeBag = sanitizeBag;
+  window.Game = Game; window.Prefs = Prefs;
+  window.xpForLevel = xpForLevel; window.levelFromXp = levelFromXp; window.xpForNextLevel = xpForNextLevel;
+  window.gainXp = gainXp; window.levelOf = levelOf; window.totalSkillLevel = totalSkillLevel;
+  window.totalOf = totalOf; window.giveItem = giveItem; window.takeItem = takeItem;
+  window.canAfford = canAfford; window.payCost = payCost;
+  window.resetToDefault = resetToDefault; window.saveGame = saveGame; window.loadGame = loadGame;
+  window.sanitizeBag = sanitizeBag; window.log = log;
 }

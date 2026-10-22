@@ -1,43 +1,64 @@
-// ===== 行动队列：多任务顺序执行 + 兜底动作 =====
-// 玩家可把若干「采集 / 制作」任务排入队列，角色按顺序自动执行；
-// 队列为空、或所有任务都被阻塞（等级不足 / 原料不足）时，自动切换到玩家设定的「兜底动作」。
+// ===== 巡历队列：多任务顺序执行 + 兜底动作 =====
+// 玩家可把若干「采集 / 制作 / 讨伐」任务排入队列，角色按顺序自动执行，
+// 需要的节点不在脚下时自动转往（履险式巡游）；队列为空或被阻塞时转入兜底动作。
 
 // ---------- 行动类型 ----------
-// mode: gather = 采集类（按产出数量计数）| recipe = 制作类（按制作次数计数）
+// mode: gather = 采集类（按产出数量计数）| recipe = 制作类（按次数计数）| taofa = 讨伐（按次数计数）
 const ActionKinds = {
-  chop:        { skill:'woodcutting',  label:'伐木', icon:'🪓', mode:'gather' },
-  mine:        { skill:'mining',       label:'挖矿', icon:'⛏️', mode:'gather' },
-  fish:        { skill:'fishing',      label:'钓鱼', icon:'🎣', mode:'gather' },
-  smith:       { skill:'smithing',     label:'锻造', icon:'🔥', mode:'recipe' },
-  craft:       { skill:'crafting',     label:'制造', icon:'🔨', mode:'recipe' },
-  fletch:      { skill:'fletching',    label:'弓弩', icon:'🏹', mode:'recipe' },
-  cook:        { skill:'cooking',      label:'烹饪', icon:'🍳', mode:'recipe' },
-  runecrafting:{ skill:'runecrafting', label:'符文', icon:'🔮', mode:'recipe' },
-  herblore:    { skill:'herblore',     label:'炼药', icon:'🧪', mode:'recipe' },
+  qiaocai: { skill:'qiaocai', label:'樵采', icon:'🪓', mode:'gather' },
+  caiyu:   { skill:'caiyu',   label:'采玉', icon:'⛏️', mode:'gather' },
+  yu:      { skill:'yu',      label:'渔',   icon:'🎣', mode:'gather' },
+  caiyao:  { skill:'caiyao',  label:'采药', icon:'🌿', mode:'gather' },
+  burn:     { skill:'fanliao', label:'燔燎', icon:'🔥', mode:'recipe' },
+  cook:     { skill:'diaoding',label:'调鼎', icon:'🍳', mode:'recipe' },
+  smith:    { skill:'yezhu',   label:'冶铸', icon:'⚒️', mode:'recipe' },
+  fletch:   { skill:'xiaoyu',  label:'削羽', icon:'🏹', mode:'recipe' },
+  craft:    { skill:'zhiqi',   label:'制器', icon:'🧵', mode:'recipe' },
+  jade:     { skill:'zhuoyu',  label:'琢玉', icon:'💠', mode:'recipe' },
+  herb:     { skill:'lianyao', label:'炼药', icon:'🧪', mode:'recipe' },
+  rite:     { skill:'jisi',    label:'祠祀', icon:'🕯️', mode:'recipe' },
+  taofa:    { skill:'taofa',   label:'讨伐', icon:'🗡️', mode:'taofa' },
+  audience: { skill:'jisi',    label:'谒见', icon:'🕯️', mode:'special' },
+  grow:     { skill:'puyi',    label:'灌木', icon:'🌱', mode:'special' },
 };
-const QUEUE_MAX = 10;                 // 队列任务数上限
-const FALLBACK_IDLE = { kind:'idle', target:'', qty:1 };   // 兜底 = 空闲
+const QUEUE_MAX = 10;
+const FALLBACK_IDLE = { kind:'idle', target:'', qty:1 };
 
 // ---------- 目标列表 ----------
 function actionTargets(kind){
   const def = ActionKinds[kind];
   if (!def) return [];
   if (def.mode === 'gather'){
-    const pool = {
-      chop: (window.WoodcuttingTrees||[]),
-      mine: (window.MiningOres||[]),
-      fish: (window.FishingSpots||[]),
-    }[kind] || [];
-    return pool.map(id=>{
+    return (GATHER_POOLS[def.skill]||[]).map(id=>{
       const it = Items[id];
       if (!it) return null;
-      return { id, name:it.name, icon:it.icon, lvl:it.lvl||1 };
+      return { id, name:it.name, icon:it.icon, lvl:it.lvl||1, node:it.node };
     }).filter(Boolean);
   }
-  return Recipes.filter(r=>r.type===kind).map(r=>{
-    const it = Items[r.out];
-    return { id:r.out, name:(it?it.name:r.out), icon:(it?it.icon:'📦'), lvl:r.lvl||1, per:r.qty||1 };
-  }).filter(Boolean);
+  if (def.mode === 'recipe'){
+    return Recipes.filter(r=>r.type===kind).map(r=>{
+      const it = Items[r.out];
+      return { id:r.out, name:(it?it.name:r.out), icon:(it?it.icon:'📦'), lvl:r.lvl||1, per:r.qty||1 };
+    }).filter(Boolean);
+  }
+  if (def.mode === 'special'){
+    if (kind === 'audience'){
+      return Object.values(AUDIENCE_SITES).map(s=>({
+        id:s.nodeId, name:'谒见 '+s.name, icon:'🕯️', lvl:(nodeOf(s.nodeId)||{}).unlockLevel||1, node:s.nodeId,
+      }));
+    }
+    if (kind === 'grow'){
+      return Object.values(GROW_SITES).map(s=>({
+        id:Object.keys(GROW_SITES).find(k=>GROW_SITES[k].nodeId===s.nodeId), name:'灌木 '+s.name, icon:'🌱',
+        lvl:(nodeOf(s.nodeId)||{}).unlockLevel||1, node:s.nodeId,
+      }));
+    }
+    return [];
+  }
+  // taofa
+  return Object.values(Monsters).filter(m=>!m.pacifist).map(m=>({
+    id:m.id, name:m.name, icon:m.boss?'🦹':'⚔️', lvl:m.needLvl||1, node:m.nodeId, boss:!!m.boss,
+  })).filter(Boolean);
 }
 
 // ---------- 任务对象 ----------
@@ -52,17 +73,16 @@ function makeQueueEntry(kind, target, qty){
   };
 }
 function entryDef(e){ return e ? ActionKinds[e.kind] : null; }
-// 任务显示名：伐木·普通原木
 function entryLabel(e){
   const def = entryDef(e);
   const it = Items[e.target];
-  const name = it ? it.name : e.target;
+  const beast = Monsters[e.target];
+  const name = it ? it.name : beast ? beast.name : e.target;
   return `${def?def.icon:'❓'}${def?def.label:'行动'}·${name}`;
 }
-// 任务单位：采集=个，制作=次
 function entryUnit(e){
   const def = entryDef(e);
-  return (def && def.mode==='recipe') ? '次' : '个';
+  return (def && def.mode==='gather') ? '个' : '次';
 }
 function entryProgressText(e){
   return `${e.done||0}/${e.qty} ${entryUnit(e)}`;
@@ -77,12 +97,38 @@ function entryCanRun(e){
     const it = Items[e.target];
     if (!it) return { ok:false, reason:'目标不存在' };
     if (levelOf(def.skill) < (it.lvl||1)) return { ok:false, reason:`${def.label} ${it.lvl} 级` };
+    const node = nodeOf(it.node);
+    if (node && !nodeUnlocked(node)) return { ok:false, reason: nodeLockReason(node) };
     return { ok:true, reason:'' };
   }
-  const rec = Recipes.find(r=>r.type===e.kind && r.out===e.target);
-  if (!rec) return { ok:false, reason:'配方不存在' };
-  if (levelOf(def.skill) < (rec.lvl||1)) return { ok:false, reason:`${def.label} ${rec.lvl} 级` };
-  if (!canAfford(rec.cost)) return { ok:false, reason:'原料不足' };
+  if (def.mode === 'recipe'){
+    const rec = Recipes.find(r=>r.type===e.kind && r.out===e.target);
+    if (!rec) return { ok:false, reason:'配方不存在' };
+    if (levelOf(def.skill) < (rec.lvl||1)) return { ok:false, reason:`${def.label} ${rec.lvl} 级` };
+    if (!canAfford(rec.cost)) return { ok:false, reason:'原料不足' };
+    return { ok:true, reason:'' };
+  }
+  if (def.mode === 'special'){
+    if (e.kind === 'audience'){
+      if (!AUDIENCE_SITES[e.target]) return { ok:false, reason:'无此神祇之山' };
+      const node = nodeOf(e.target);
+      if (node && !nodeUnlocked(node)) return { ok:false, reason: nodeLockReason(node) };
+      return { ok:true, reason:'' };
+    }
+    if (e.kind === 'grow'){
+      if (!GROW_SITES[e.target]) return { ok:false, reason:'无此养成之地' };
+      const node = nodeOf(GROW_SITES[e.target].nodeId);
+      if (node && !nodeUnlocked(node)) return { ok:false, reason: nodeLockReason(node) };
+      return { ok:true, reason:'' };
+    }
+    return { ok:false, reason:'未知行动' };
+  }
+  // taofa
+  const m = Monsters[e.target];
+  if (!m) return { ok:false, reason:'目标不存在' };
+  if ((m.needLvl||1) > levelOf('taofa')) return { ok:false, reason:`讨伐 ${m.needLvl} 级` };
+  const node = nodeOf(m.nodeId);
+  if (node && !nodeUnlocked(node)) return { ok:false, reason: nodeLockReason(node) };
   return { ok:true, reason:'' };
 }
 
@@ -92,8 +138,10 @@ function entryMatchesActivity(e){
   if (!a || !e) return false;
   const def = entryDef(e);
   if (!def) return false;
-  if (def.mode === 'gather') return a.kind === e.kind && a.itemId === e.target;
-  return a.kind === e.kind && !!(a.recipe) && a.recipe.out === e.target;
+  if (def.mode === 'gather') return a.kind === 'gather' && a.itemId === e.target;
+  if (def.mode === 'recipe') return a.kind === 'craft' && !!(a.recipe) && a.recipe.out === e.target;
+  if (def.mode === 'special') return a.kind === e.kind && (a.nodeId === e.target || a.siteId === e.target);
+  return a.kind === 'taofa' && a.target === e.target;
 }
 function startEntryActivity(e, src){
   const def = entryDef(e);
@@ -101,13 +149,25 @@ function startEntryActivity(e, src){
   if (def.mode === 'gather'){
     const it = Items[e.target];
     if (!it) return false;
+    if (it.node !== Game.node){ if (!travelTo(it.node)) return false; }
     activityProgress = 0;
-    Game.activity = { kind:e.kind, itemId:e.target, src: src||'queue' };
-  } else {
+    Game.activity = { kind:'gather', skill:def.skill, itemId:e.target, src: src||'queue' };
+  } else if (def.mode === 'recipe'){
     const rec = Recipes.find(r=>r.type===e.kind && r.out===e.target);
     if (!rec) return false;
     activityProgress = 0;
-    Game.activity = { kind:e.kind, recipe:rec, src: src||'queue' };
+    Game.activity = { kind:'craft', recipe:rec, src: src||'queue' };
+  } else if (def.mode === 'special'){
+    if (e.target !== Game.node){ if (!travelTo(e.target)) return false; }
+    activityProgress = 0;
+    Game.activity = e.kind === 'audience'
+      ? { kind:'audience', nodeId:e.target, src: src||'queue' }
+      : { kind:'grow', siteId:e.target, nodeId:(GROW_SITES[e.target]||{}).nodeId, src: src||'queue' };
+  } else {
+    const m = Monsters[e.target];
+    if (!m) return false;
+    if (m.nodeId !== Game.node){ if (!travelTo(m.nodeId)) return false; }
+    startCombat(e.target);
   }
   return true;
 }
@@ -133,17 +193,17 @@ function startQueue(){
   Game.queueRunning = true;
   ensureQueueActivity();
   if (UI && UI.toast){
-    UI.toast(Game.queue.length ? '▶ 任务队列已启动' : '▶ 已启动（无任务，执行兜底动作）');
+    UI.toast(Game.queue.length ? '▶ 巡历队列已启动' : '▶ 已启动（无任务，执行兜底动作）');
   }
-  log('▶ 任务队列启动', 'good');
+  log('▶ 巡历队列启动', 'good');
   saveGame();
   return true;
 }
 function pauseQueue(reason){
   if (!Game.queueRunning) return false;
   Game.queueRunning = false;
-  if (UI && UI.toast) UI.toast(`⏸ 任务队列已暂停${reason?`（${reason}）`:''}`);
-  log('⏸ 任务队列已暂停', 'gold');
+  if (UI && UI.toast) UI.toast(`⏸ 巡历队列已暂停${reason?`（${reason}）`:''}`);
+  log('⏸ 巡历队列已暂停', 'gold');
   saveGame();
   return true;
 }
@@ -200,7 +260,7 @@ function setFallback(kind, target, qty){
 // ---------- 主驱动（由 gameLoop 调用） ----------
 function ensureQueueActivity(){
   if (!Game.queueRunning) return;
-  if (Game.combat) return;              // 战斗中不抢占行动
+  if (Game.combat) return;              // 战斗中不抢占
   const list = Game.queue;
   if (!list.length){ applyFallback(); return; }
   let guard = 0;
@@ -215,7 +275,7 @@ function ensureQueueActivity(){
     }
     // 当前任务被阻塞 → 顺延到下一个可执行任务
     const next = (Game.queueIdx + 1) % list.length;
-    if (next === Game.queueIdx){ applyFallback(); return; }   // 全部阻塞 → 兜底
+    if (next === Game.queueIdx){ applyFallback(); return; }
     if (!Game.queueLoop && next === 0){
       Game.queueIdx = 0;
       Game.queueRound++;
@@ -230,21 +290,38 @@ function ensureQueueActivity(){
 }
 
 // ---------- 任务进度（由 performAction 调用） ----------
+// 特殊行动（谒见/灌木）每完成一回计一次
+function queueOnSpecialDone(a){
+  if (!Game.queueRunning) return;
+  if (!Game.activity || Game.activity.src !== 'queue') return;
+  const e = Game.queue[Game.queueIdx];
+  if (!e) return;
+  const def = entryDef(e);
+  if (!def || def.mode !== 'special') return;
+  if (a.kind !== e.kind) return;
+  if (a.kind === 'audience' && a.nodeId !== e.target) return;
+  if (a.kind === 'grow' && a.siteId !== e.target) return;
+  e.done = (e.done||0) + 1;
+  if (e.done >= e.qty) onQueueEntryDone(e);
+}
+window.queueOnSpecialDone = queueOnSpecialDone;
+
 function queueOnActionDone(a, gained){
   if (!Game.queueRunning) return;
   if (!Game.activity || Game.activity.src !== 'queue') return;
   const e = Game.queue[Game.queueIdx];
-  if (!e || a.kind !== e.kind) return;
+  if (!e) return;
   const def = entryDef(e);
   if (!def) return;
   if (def.mode === 'recipe'){
-    // 制作类：按「制作次数」计数
-    if (!a.recipe || a.recipe.out !== e.target) return;
+    if (a.kind !== 'craft' || !a.recipe || a.recipe.out !== e.target) return;
     e.done = (e.done||0) + 1;
-  } else {
-    // 采集类：按产出数量计数
-    if (a.itemId !== e.target) return;
+  } else if (def.mode === 'gather'){
+    if (a.kind !== 'gather' || a.itemId !== e.target) return;
     e.done = (e.done||0) + Math.max(0, gained||0);
+  } else {
+    // 讨伐按次数计数（由 meetKill 调用）
+    return;
   }
   if (e.done >= e.qty) onQueueEntryDone(e);
 }
@@ -263,7 +340,6 @@ function onQueueEntryDone(e){
     Game.queueRound++;
     Game.queueIdx = 0;
     if (!Game.queueLoop){
-      // 单轮模式：跑完一轮后转入兜底动作
       Game.queueRunning = false;
       applyFallback();
       saveGame();
@@ -298,5 +374,4 @@ if (typeof window !== 'undefined'){
   window.fallbackEntry = fallbackEntry;
   window.ensureQueueActivity = ensureQueueActivity;
   window.queueOnActionDone = queueOnActionDone;
-  window.queueOnActionDoneRef = queueOnActionDone;
 }

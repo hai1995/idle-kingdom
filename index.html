@@ -3,40 +3,34 @@
 <head>
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width, initial-scale=1.0">
-<title>放置王国 · Idle Kingdom</title>
-<link rel="icon" href="data:image/svg+xml,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 100 100'><text y='.9em' font-size='90'>🏰</text></svg>">
+<title>山海经 · 放置挂机 —— 著录</title>
+<link rel="icon" href="data:image/svg+xml,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 100 100'><text y='.9em' font-size='90'>📜</text></svg>">
 <link rel="stylesheet" href="style.css">
 </head>
 <body onload="init()">
 <div id="app">
 
-  <!-- 顶栏 -->
-  <header id="topbar">
-    <div class="left">
-      <span id="playerName" class="title">冒险者</span>
-      <span class="level lv-combat">战斗 Lv <b id="combatLevel">1</b></span>
-      <span class="level lv-total">总 Lv <b id="totalLevel">16</b></span>
-      <span class="gold">💰 <b id="money">0</b></span>
-    </div>
-    <div class="right">
-      <button id="btnSettings" class="icon-btn" title="设置">⚙️</button>
-      <button id="btnSave" class="btn-mini" title="快捷键 S">存档</button>
-    </div>
-  </header>
+  <!-- 顶栏 + 导航（整体吸顶，滚动时始终可见） -->
+  <div id="topdock">
+    <header id="topbar">
+      <div class="left">
+        <span class="title">山海经 · 著录<small>南山经</small></span>
+        <span class="stat" data-s="级" title="总等级"><i class="lb">总等级</i> <b id="totalLevel">26</b></span>
+        <span class="stat" data-s="高" title="最高技能"><i class="lb">最高</i> <b id="maxSkill">—</b></span>
+        <span class="stat" data-s="录" title="已录条目"><i class="lb">已录</i> <b id="recordCount">0/0</b></span>
+        <span class="stat opt" data-s="兆" title="征兆"><i class="lb">征兆</i> <b id="omenCount">0</b></span>
+        <span class="stat" data-s="🐚" title="贝币"><i class="lb">贝币</i> <b id="shellCount">0</b></span>
+      </div>
+      <div class="right">
+        <button id="btnSettings" class="icon-btn" title="设置">⚙️</button>
+        <button id="btnSave" class="btn-mini" title="快捷键 S">存档</button>
+      </div>
+    </header>
 
-  <!-- 导航 -->
-  <nav id="tabs">
-    <button class="tab active" data-tab="skills">技能</button>
-    <button class="tab" data-tab="combat">战斗</button>
-    <button class="tab" data-tab="bank">仓库</button>
-    <button class="tab" data-tab="inventory">背包</button>
-    <button class="tab" data-tab="equipment">装备</button>
-    <button class="tab" data-tab="shop">商店</button>
-    <button class="tab" data-tab="queue">行动</button>
-    <button class="tab" data-tab="farming">农牧</button>
-    <button class="tab" data-tab="stats">统计</button>
-    <button class="tab" data-tab="log">日志</button>
-  </nav>
+    <nav id="tabs">
+      <!-- 各页签由 JS 渲染 -->
+    </nav>
+  </div>
 
   <!-- 主内容区域 -->
   <main id="content">
@@ -46,7 +40,7 @@
   <!-- 底部状态条 -->
   <footer id="statusbar">
     <span id="hpDisplay">❤️ <b>0</b>/0</span>
-    <span id="buffDisplay" class="buff"></span>
+    <span id="buffDisplay" class="hidden"></span>
     <div id="actionProg" class="hidden"><div id="actionProgFill"></div></div>
     <span id="activityText">状态：空闲</span>
     <button id="btnStop" class="btn-mini">停止</button>
@@ -58,6 +52,10 @@
 <div id="toasts"></div>
 <div id="modal" class="hidden"><div id="modalBox"></div></div>
 
+<script src="src/nanshanData.js"></script>
+<script src="src/xishanData.js"></script>
+<script src="src/beishanData.js"></script>
+<script src="src/dongshanData.js"></script>
 <script src="src/gameData.js"></script>
 <script src="src/engine.js"></script>
 <script src="src/game.js"></script>

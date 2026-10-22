@@ -1,23 +1,60 @@
-// ===== 活动逻辑：采集 / 加工 / 战斗 / 农牧 =====
+// ===== 活动逻辑：采集 / 制作 / 祠祀 / 观象 / 卜筮 / 五行战斗 / 御使 / 主循环 =====
 
-// ---------- 辅助 ----------
+// ---------- 基础辅助 ----------
 function roll(min,max){ return Math.floor(Math.random()*(max-min+1))+min; }
 function chance(p){ return Math.random() < p; }
 function clamp(v,a,b){ return Math.max(a, Math.min(b,v)); }
+function gameTime(){ return Game.stats.time; }
 
-// ===== 里程碑被动 & 药水 buff =====
-function maxSkillLevel(){
-  let m=1;
-  for (const id in Game.skills){ if (Game.skills[id].level > m) m = Game.skills[id].level; }
-  return m;
+// ---------- 地图 / 区域 ----------
+function regionOf(nodeId){
+  for (const r of WORLD.regions) for (const n of r.nodes) if (n.id === nodeId) return r;
+  return null;
 }
+function nodeOf(nodeId){
+  for (const r of WORLD.regions) for (const n of r.nodes) if (n.id === nodeId) return n;
+  return null;
+}
+function regionUnlocked(r){ return levelOf('yudi') >= r.unlockLevel; }
+function nodeUnlocked(n){
+  if (levelOf('yudi') < n.unlockLevel) return false;
+  if (n.hazard && (n.hazard.type === '不可以上') && levelOf('lvxian') < n.unlockLevel) return false;
+  return true;
+}
+function nodeLockReason(n){
+  if (levelOf('yudi') < n.unlockLevel) return `需舆地 ${n.unlockLevel} 级`;
+  if (n.hazard && n.hazard.type === '不可以上' && levelOf('lvxian') < n.unlockLevel) return `「不可以上」需履险 ${n.unlockLevel} 级`;
+  return '';
+}
+// 前往节点（首次到访给舆地/履险经验）
+function travelTo(nodeId){
+  const n = nodeOf(nodeId);
+  if (!n) return false;
+  if (!nodeUnlocked(n)){ UI && UI.toast('🔒 ' + nodeLockReason(n)); return false; }
+  const first = !Game.map[nodeId];
+  Game.node = nodeId;
+  Game.map[nodeId] = true;
+  if (first){
+    gainXp('yudi', 20 + n.unlockLevel);
+    gainXp('lvxian', 15 + n.unlockLevel);
+    addRecord(nodeId, 1);
+    log(`🗺️ 初至${n.name}（${n.chapter}）`, 'yudi', 'skill');
+    UI && UI.toast(`🗺️ 初至 ${n.name}`);
+  }
+  saveGame();
+  if (UI && UI.refreshMap) UI.refreshMap();
+  return true;
+}
+window.travelTo = travelTo; window.nodeOf = nodeOf; window.regionOf = regionOf;
+window.regionUnlocked = regionUnlocked; window.nodeUnlocked = nodeUnlocked; window.nodeLockReason = nodeLockReason;
+
+// ---------- 全局修正 ----------
 function milestonesUnlocked(){
   const out = {};
   (window.Milestones||[]).forEach(ms=>{ out[ms.id] = ms.check(); });
   return out;
 }
-function milestoneCount(){ const u=milestonesUnlocked(); let n=0; for(const k in u) if(u[k]) n++; return n; }
-// 里程碑解锁提示：仅在首次达成时弹出（seenMilestones 记录已提示过的里程碑）
+function milestoneCount(){ const u = milestonesUnlocked(); let n=0; for(const k in u) if(u[k]) n++; return n; }
 function checkMilestoneToast(){
   const unlocked = milestonesUnlocked();
   if (!Game.stats.seenMilestones || typeof Game.stats.seenMilestones !== 'object') Game.stats.seenMilestones = {};
@@ -25,475 +62,879 @@ function checkMilestoneToast(){
   let newly = 0;
   (window.Milestones||[]).forEach(ms=>{
     if (unlocked[ms.id] && !seen[ms.id]){
-      seen[ms.id] = true;
-      newly++;
-      log(`🏅 里程碑解锁：${ms.name} —— ${ms.bonus}`, 'gold', 'sys');
+      seen[ms.id] = true; newly++;
+      log(`🏅 长线成就：${ms.name} —— ${ms.bonus}`, 'gold', 'sys');
       UI && UI.toast(`🏅 ${ms.name}\n${ms.bonus}`);
     }
   });
   if (newly) saveGame();
   return newly;
 }
+window.milestonesUnlocked = milestonesUnlocked; window.milestoneCount = milestoneCount;
 window.checkMilestoneToast = checkMilestoneToast;
+
+// 御使槽内异兽的被动加成汇总
+function deployedBonuses(){
+  const b = { gatherSpeed:0, xp:0, farmSpeed:0, div:0, hp:0, def:0, offline:0, trade:0, dmg:0, loot:0, cookQty:0, build:0, yield:0, heal:0 };
+  for (const k in Game.deployed){
+    const beast = Monsters[Game.deployed[k]];
+    if (!beast) continue;
+    const def = BEAST_BUFFS[beast.id] || genericBeastBuff(beast);
+    const scale = 0.6 + 0.1 * ((Game.records[beast.id]||{}).tier||0);
+    for (const key in def) if (key !== 'label' && typeof def[key] === 'number') b[key] += def[key] * scale;
+  }
+  return b;
+}
+// 未单独设计的异兽：按类目给一份基础增益（西山异兽众多，各有其用）
+function genericBeastBuff(beast){
+  if (beast.category === '鸟') return { label:'驭鸟', xp:0.02 };
+  if (beast.category === '水族') return { label:'驭水族', def:1 };
+  return { label:'驭兽', hp:0.02 };
+}
 function xpMult(){
   let m = 1;
-  // 里程碑经验加成
   (window.Milestones||[]).forEach(ms=>{ if (ms.xp && ms.check()) m += ms.xp; });
-  // 护符的 xpBonus（经验加成）
-  if (Game.gear.amulet && Game.gear.amulet.xpBonus) m += Game.gear.amulet.xpBonus;
-  m += levelOf('herblore')*0.0005;                 // 炼药等级微量加成
+  m += deployedBonuses().xp;
+  if (Game.buff && Game.buff.def && Game.buff.def.kind === 'xp') m += Game.buff.def.xpBonus || 0;
   return m;
 }
 function dmgMult(){
   let m = 1;
-  // 里程碑伤害加成
   (window.Milestones||[]).forEach(ms=>{ if (ms.dmg && ms.check()) m += ms.dmg; });
-  // 生效中的攻击/力量/烈焰药水（按药剂定义取值）
-  if (Game.buff && Potions[Game.buff.type] && Potions[Game.buff.type].dmg) m += Potions[Game.buff.type].dmg;
+  m += deployedBonuses().dmg;
+  if (Game.buff && Game.buff.def && Game.buff.def.kind === 'all' && Game.buff.def.dmg) m += Game.buff.def.dmg;
   return m;
 }
 function defBonus(){
-  let b = 0;
-  if (Game.buff && Potions[Game.buff.type] && Potions[Game.buff.type].def) b += Potions[Game.buff.type].def;
+  let b = deployedBonuses().def;
+  if (Game.gear.charm && Game.gear.charm.defBonus) b += Game.gear.charm.defBonus;
+  if (Game.buff && Game.buff.def && Game.buff.def.kind === 'def') b += Game.buff.def.def;
+  if (Game.buff && Game.buff.def && Game.buff.def.kind === 'all' && Game.buff.def.def) b += Game.buff.def.def;
   return b;
 }
-function gatherSpeedMult(){ // >1 表示更快
+function gatherSpeedMult(){
+  let m = 1 + deployedBonuses().gatherSpeed;
+  (window.Milestones||[]).forEach(ms=>{ if (ms.gather && ms.check()) m *= (1 + ms.gather); });
+  if (Game.gear.charm && Game.gear.charm.gatherBonus) m += Game.gear.charm.gatherBonus;
+  if (Game.buff && Game.buff.def && Game.buff.def.kind === 'gather') m += Game.buff.def.gather;
+  m += omenMod('gather');            // 长右「大水」：采集效率 -20%
+  return Math.max(0.3, m);
+}
+function farmSpeedMult(){
+  let m = 1 + deployedBonuses().farmSpeed;
+  if (Game.gear.charm && Game.gear.charm.farmBonus) m += Game.gear.charm.farmBonus;
+  return m;
+}
+function divMult(){
+  let m = 1 + deployedBonuses().div;
+  if (Game.gear.charm && Game.gear.charm.divBonus) m += Game.gear.charm.divBonus;
+  if (Game.buff && Game.buff.def && Game.buff.def.kind === 'div') m += Game.buff.def.div;
+  m += omenMod('divine');           // 酸与「有恐」：卜筮失准 -30%
+  return Math.max(0.4, m);
+}
+function tradeMult(){
+  let m = 1 + deployedBonuses().trade + Math.min(0.20, levelOf('shanglv')*0.005);
+  if (Game.buildings.shichan) m += 0.05;
+  m += omenMod('trade');             // 鴸「放士」：商旅收益 -10%
+  return Math.max(0.5, m);
+}
+function globalYieldBonus(){
+  let b = 0;
+  (window.Milestones||[]).forEach(ms=>{ if (ms.yield && ms.check()) b += ms.yield; });
+  b += deployedBonuses().yield;
+  b += omenMod('yield');             // 凤皇「天下安宁」：全局产出 +15%
+  if (Game.buff && Game.buff.def && Game.buff.def.kind === 'all' && Game.buff.def.yield) b += Game.buff.def.yield;
+  return b;
+}
+function isWise(){                       // 灌灌「佩之不惑」
+  if (Game.buff && Game.buff.def && Game.buff.def.kind === 'wise') return true;
+  if (Game.gear.charm && Game.gear.charm.wise) return true;
+  return !!Game.stats.omens.guanguan;
+}
+function offlineEff(){
+  let e = TUNING.OFFLINE.EFF_BASE + TUNING.OFFLINE.EFF_PER * Math.min(6, Math.floor(maxSkillLevel()/10));
+  (window.Milestones||[]).forEach(ms=>{ if (ms.offlineEff && ms.check()) e += ms.offlineEff; });
+  if (Game.buildings.canglin) e += 0.05;
+  if (Game.buff && Game.buff.def && Game.buff.def.kind === 'offline') e += Game.buff.def.offline;
+  e += deployedBonuses().offline;
+  e += omenMod('offline');              // 猾褢「大繇」：离线收益 -25%
+  return clamp(e, 0.1, TUNING.OFFLINE.EFF_MAX);
+}
+function offlineCapHours(){
+  let h = TUNING.OFFLINE.CAP_H;
+  if (Game.buildings.canglin) h += 2;
+  h += Object.values(Game.observed||{}).filter(Boolean).length;   // 每处观象 +1h
+  return h;
+}
+function maxSkillLevel(){
   let m = 1;
-  // 里程碑采集加成
-  (window.Milestones||[]).forEach(ms=>{ if (ms.gather && ms.check()) m *= (1+ms.gather); });
-  // 敏捷药剂
-  if (Game.buff && Potions[Game.buff.type] && Potions[Game.buff.type].kind==='gather'){
-    m *= (1 + (Potions[Game.buff.type].gather||0.35));
+  for (const id in Game.skills) if (Game.skills[id].level > m) m = Game.skills[id].level;
+  return m;
+}
+window.xpMult = xpMult; window.dmgMult = dmgMult; window.defBonus = defBonus;
+window.gatherSpeedMult = gatherSpeedMult; window.farmSpeedMult = farmSpeedMult;
+window.divMult = divMult; window.tradeMult = tradeMult; window.globalYieldBonus = globalYieldBonus;
+window.isWise = isWise; window.offlineEff = offlineEff; window.offlineCapHours = offlineCapHours;
+window.maxSkillLevel = maxSkillLevel; window.deployedBonuses = deployedBonuses;
+
+// ---------- 征兆系统 ----------
+function activateOmen(id){
+  const def = OMENS[id];
+  if (!def) return;
+  // 征兆免疫：鵕鸟/大鹗之诛所赐；御使駮「可以御兵」御兵灾
+  if (Game.omenImmune[id]) return;
+  if (def.war && Object.values(Game.deployed||{}).includes('bo')) return;
+  const soft = isWise() ? 0.5 : 1;                     // 灌灌「不惑」：凶兆减半
+  if (def.dur > 0){
+    const existing = Game.omens.find(o=>o.id===id);
+    if (existing){ existing.until = Math.max(existing.until, gameTime()+def.dur); }
+    else Game.omens.push({ id, until: gameTime()+def.dur, soft });
+  }
+  Game.stats.omens[id] = true;
+  const mark = def.polarity === '凶' ? '🔴' : def.polarity === '吉' ? '🟢' : '🟡';
+  log(`${mark} 征兆·${def.type}：${def.desc}（${def.beast}）`, def.polarity==='凶'?'bad':'gold', 'sys');
+  UI && UI.toast(`${mark} 征兆·${def.type}\n${def.desc}`);
+  saveGame();
+}
+function omenMod(key){
+  let m = 0;
+  for (const o of Game.omens){
+    const def = OMENS[o.id];
+    if (!def || def[key] === undefined) continue;
+    m += def[key] * (o.soft || 1);
   }
   return m;
 }
-function activeBuffName(){
-  if (!Game.buff) return '无';
-  const def = Potions[Game.buff.type];
-  return def ? def.name : ('药水·'+Game.buff.type);
+function tickOmens(){
+  const t = gameTime();
+  let changed = false;
+  for (let i=Game.omens.length-1; i>=0; i--){
+    if (Game.omens[i].until <= t){ Game.omens.splice(i,1); changed = true; }
+  }
+  if (changed) saveGame();
 }
+// 禳解：消耗白菅与稻米，提前禳除凶兆
+function exorcise(){
+  const xiong = Game.omens.filter(o=>OMENS[o.id] && OMENS[o.id].polarity === '凶');
+  if (!xiong.length){ UI && UI.toast('当前无凶兆可禳'); return false; }
+  const cost = [['jian',3],['dao',3]];
+  if (!canAfford(cost)){ UI && UI.toast('禳解需 白菅×3、稻米×3'); return false; }
+  payCost(cost);
+  const removed = xiong.map(o=>OMENS[o.id].type);
+  Game.omens = Game.omens.filter(o=>!(OMENS[o.id] && OMENS[o.id].polarity === '凶'));
+  gainXp('jisi', 60);
+  log(`🕯️ 禳解凶兆：${removed.join('、')}`, 'good', 'sys');
+  UI && UI.toast(`🕯️ 已禳除：${removed.join('、')}`);
+  saveGame();
+  return true;
+}
+window.activateOmen = activateOmen; window.omenMod = omenMod; window.tickOmens = tickOmens; window.exorcise = exorcise;
 
+// ---------- 药饵 / 进食 ----------
 function tickBuffs(dt){
   if (!Game.buff) return;
   Game.buff.remaining -= dt;
-  if (Game.buff.remaining <= 0) {
-    const def = Potions[Game.buff.type];
-    log(`⌛ 药水效果 ${def?def.name:Game.buff.type} 已结束。`, 'gold', 'sys');
+  if (Game.buff.remaining <= 0){
+    log(`⌛ ${Game.buff.def.name} 之效已过`, 'gold', 'sys');
     Game.buff = null;
   }
 }
-function drinkPotion(itemId){
+function useConsumable(itemId){
   const it = Items[itemId];
-  if (!it || !it.buff || !Potions[itemId]) return;
-  const def = Potions[itemId];
+  if (!it) return false;
   const invQty = Game.inventory[itemId]||0;
-  if (invQty <= 0){ UI && UI.toast('背包里没有该药剂'); return; }
-  Game.inventory[itemId]--;
-  if (Game.inventory[itemId]<=0) delete Game.inventory[itemId];
-  Game.stats.potions++;
-  Game.buff = { type:itemId, kind:def.kind, remaining:def.dur, dur:def.dur };
-  saveGame();
-  log(`🧪 饮用了 ${def.name}：${def.desc}`, 'herblore', 'sys');
-  UI && UI.floatText(playerEl(), `🧪 ${def.name}`, '#80e0a5');
-  UI && UI.toast(`药水生效！${def.name}`);
-  return true;
-}
-window.drinkPotion = drinkPotion;
-window.milestonesUnlocked = milestonesUnlocked;
-window.maxSkillLevel = maxSkillLevel;
-window.xpMult = xpMult;
-window.dmgMult = dmgMult;
-window.defBonus = defBonus;
-window.gatherSpeedMult = gatherSpeedMult;
-window.milestoneCount = milestoneCount;
-window.tickBuffs = tickBuffs;
-
-// 自动购买更好的工具（斧 / 镐 / 钓竿）：满足等级且金币足够时，从商店买下一阶并装备
-function autoBuyTools(){
-  if (!Game.auto_buy_tools) return;
-  const shop = window.ShopStock || [];
-  // 工具类型 → [对应技能, 装备槽位]
-  const kinds = { axePower:['woodcutting','axe'], pickPower:['mining','pickaxe'], rodPower:['fishing','rod'] };
-  for (const attr in kinds){
-    const [lvlSkill, slot] = kinds[attr];
-    if (slotLocked(slot)) continue;                       // 锁定槽位不自动更换
-    tryBuy(attr, lvlSkill, slot);
-  }
-  function tryBuy(kind, lvlSkill, slot){
-    const candidates = shop.filter(s=>{
-      const it = Items[s.itemId];
-      return it && it[kind] && levelOf(lvlSkill) >= it.lvl && Game.coins >= s.cost;
-    }).sort((a,b)=> (Items[b.itemId][kind]||0) - (Items[a.itemId][kind]||0));
-    if (!candidates.length) return;
-    const best = candidates[0];
-    const bestIt = Items[best.itemId];
-    const cur = Game.gear[slot];
-    const curPower = cur ? (cur[kind]||0) : 0;
-    if ((bestIt[kind]||0) > curPower){
-      Game.coins -= best.cost;
-      giveItem(best.itemId, 1, false);
-      log(`🛒 自动购买并装备 ${bestIt.name}`, 'gold', 'trade');
-      if (typeof equipItem === 'function') equipItem(best.itemId);
-      saveGame();
+  if (invQty <= 0){ UI && UI.toast('行囊中没有此物'); return false; }
+  if (it.heal){ // 食物：即时回血
+    Game.inventory[itemId]--;
+    if (Game.inventory[itemId]<=0) delete Game.inventory[itemId];
+    if (Game.combat){
+      Game.combat.playerHp = Math.min(playerMaxHp(), Game.combat.playerHp + it.heal);
+      UI && UI.floatText(playerEl(), `+${it.heal} ❤️`, '#58b368');
     }
+    log(`🍖 食${it.name}${it.effect?`，${it.effect}`:''}`, 'good', 'sys');
+    UI && UI.toast(`🍖 ${it.name}${it.heal?` 回血 ${it.heal}`:''}`);
+    saveGame();
+    return true;
   }
+  if (it.buff){ // 药剂：限时增益
+    Game.inventory[itemId]--;
+    if (Game.inventory[itemId]<=0) delete Game.inventory[itemId];
+    Game.buff = { itemId, def: it.buff, remaining: it.buff.dur, dur: it.buff.dur };
+    log(`🧪 服${it.name}：${it.effect||''}`, 'good', 'sys');
+    UI && UI.toast(`🧪 ${it.name} 生效（${it.buff.dur}s）`);
+    saveGame();
+    return true;
+  }
+  UI && UI.toast('此物不可服用');
+  return false;
 }
-window.autoBuyTools = autoBuyTools;
+window.useConsumable = useConsumable;
 
-// 采集工具加成
-function playerToolXp(typeAttr){ // 'axePower' | 'pickPower'
-  const gear = Game.gear[typeAttr==='axePower' ? 'axe' : 'pickaxe'];
-  if (gear) return gear[typeAttr] || 0;
-  return 0;
-}
-// 采集动作间隔（秒）= max(1.2, 3.5 - power*0.12 - (level^0.22))
-function gatherInterval(attr){
-  const power = playerToolXp(attr);
-  let base = 3.6 - power*0.12;
-  if (attr==='axePower') base -= levelOf('woodcutting')*0.025;
-  else base -= levelOf('mining')*0.025;
-  const m = gatherSpeedMult();
-  if (m !== 1) base = base / m;
+// ---------- 采集 ----------
+const GATHER_TOOL = { qiaocai:'axePower', caiyu:'pickPower', yu:'netPower' };
+function gatherInterval(skillId){
+  const attr = GATHER_TOOL[skillId];
+  const slot = attr === 'axePower' ? 'axe' : attr === 'pickPower' ? 'pick' : 'net';
+  const power = (attr && Game.gear[slot]) ? (Game.gear[slot][attr]||0) : 0;
+  const lvl = levelOf(skillId);
+  let base;
+  if (skillId === 'yu')         base = 4.5 - power*0.15 - lvl*0.02;
+  else if (skillId === 'caiyao') base = 3.4 - lvl*0.025;
+  else                          base = 3.6 - power*0.12 - lvl*0.025;
+  base = base / Math.max(0.3, gatherSpeedMult());
   return Math.max(1.05, base);
 }
+function doGather(itemId){
+  const it = Items[itemId];
+  if (!it || !it.skill) return;
+  const skillId = it.skill;
+  if (levelOf(skillId) < it.lvl){ Game.activity = null; UI && UI.toast(`🔒 需${Skills[skillId].name} ${it.lvl} 级`); return; }
+  // 产地校验（同名产物可分布多山）；积石之山「万物无不有焉」不受产地限制
+  const nodes = it.nodes || (it.node ? [it.node] : []);
+  const special = (window.SPECIAL_NODES||{})[Game.node];
+  const allYield = !!(special && special.allYield);
+  if (!allYield && !nodes.includes(Game.node)){
+    UI && UI.toast(`此地不产${it.name}，需往${(nodeOf(nodes[0])||{}).name||'其所'}`);
+    return;
+  }
+  const rec = Game.records[itemId] || { count:0, tier:0 };
+  let bonus = masteryBonus(rec.count) + globalYieldBonus();
+  if (special && special.rareBonus) bonus += special.rareBonus;   // 积石之山：万物无不有焉
+  let qty = 1;
+  if (chance(TUNING.GATHER_DOUBLE + bonus*0.5)) qty = 2;
+  if (chance(bonus*0.12)) qty += 1;
+  giveItem(itemId, qty, false);
+  Game.stats.gathers[skillId] = (Game.stats.gathers[skillId]||0) + 1;
+  gainXp(skillId, it.xp * qty * (1 + bonus*0.5));
+  recordObject(itemId, qty);
+  // 渔获兼得：𩶯魮之鱼「是生珠玉」
+  const gb = (window.GATHER_BONUS||{})[itemId];
+  if (gb && chance(gb.chance) && Items[gb.item]){
+    giveItem(gb.item, 1, false);
+    log(`✨ ${it.name}${gb.note?`——${gb.note}`:''}，兼得 ${Items[gb.item].name}`, 'gold', 'skill');
+  }
+  // 共生采集：鸟鼠同穴之山——渔获兼得山玉
+  if (special && special.symbiosis && skillId === 'yu' && chance(special.symbiosis.chance)){
+    giveItem(special.symbiosis.item, 1, false);
+    log(`🐦🐀 鸟鼠同穴，渔获兼得 ${Items[special.symbiosis.item].name}`, 'gold', 'skill');
+  }
+  // 钦原「蠚木则枯」：昆仑之丘田地威胁事件
+  if (special && special.gardenThreat && Object.keys(Game.farms).length && chance(special.gardenThreat.chance)){
+    const slots = Object.keys(Game.farms);
+    const victim = slots[roll(0, slots.length-1)];
+    const crop = Items[Game.farms[victim].seedId];
+    delete Game.farms[victim];
+    log(`🐝 ${special.gardenThreat.beast}蠚木，田地${slotIdNum(victim)}之${crop?crop.name:'苗'}枯死`, 'bad', 'sys');
+    UI && UI.toast(`🐝 ${special.gardenThreat.beast}蠚木则枯——一田焦枯`);
+  }
+  UI && UI.log(`${Skills[skillId].icon} 采得 ${it.name} ×${qty}`, skillId, 'skill');
+  UI && UI.actionFeedback(skillId, it.icon, qty);
+}
+// 著录一个对象（含阶位提升、异兽征兆触发、关联著录）
+function recordObject(objId, n){
+  const r = addRecord(objId, n);
+  const beast = Object.values(Monsters).find(m=>m.id === objId);
+  if (r.first){
+    gainXp('zhulu', 10);
+    // 首次著录带征兆的异兽 → 触发全局事件（「见则X」）
+    if (beast && beast.omen) activateOmen(beast.omen);
+    // 关联著录：见鵕鸟/大鹗而知鼓与钦䲹之事
+    if (beast && beast.alsoRecord) beast.alsoRecord.forEach(id=>addRecord(id, 1));
+    // 鵕鸟/大鹗：击杀（著录）后免疫对应征兆
+    if (objId === 'junniao'){ Game.omenImmune.junniao = true; log('🛡️ 已免疫「其邑大旱」之兆', 'gold', 'sys'); UI && UI.toast('🛡️ 免疫：其邑大旱'); }
+    if (objId === 'dae'){ Game.omenImmune.dae = true; log('🛡️ 已免疫「有大兵」之兆', 'gold', 'sys'); UI && UI.toast('🛡️ 免疫：有大兵'); }
+  }
+  if (r.tierUp){
+    const name = (CODEX[objId]||{}).name || objId;
+    gainXp('zhulu', 30*(r.tier+1));
+    log(`📜 著录进阶：${name} —— ${TUNING.MASTERY.NAMES[r.tier]}`, 'gold', 'skill');
+    UI && UI.toast(`📜 ${name} 著录至「${TUNING.MASTERY.NAMES[r.tier]}」`);
+  }
+  return r;
+}
+window.doGather = doGather; window.recordObject = recordObject;
 
-// 红区主播——作物生长 tick
+// ---------- 圃艺 ----------
 function farmTick(elapsed){
   const grew = [];
+  const speed = farmSpeedMult();
   for (const slot in Game.farms){
     const f = Game.farms[slot];
     if (!f || !f.seedId) continue;
     const seed = Items[f.seedId];
     if (!seed || !seed.crop){ delete Game.farms[slot]; continue; }
-    f.remain -= elapsed;
+    f.remain -= elapsed * speed;
     if (f.remain <= 0){
-      // 收获
+      const crop = Items[seed.crop];
       giveItem(seed.crop, 1, false);
-      Game.stats.harvests = (Game.stats.harvests||0) + 1;
-      gainXp('farming', (Items[seed.crop].xp||10));
-      if (chance(0.25)) giveItem(f.seedId, 1, false); // 返还种子
-      log(`🌾 农地${slotIdNum(slot)} 收获了 ${Items[seed.crop].name}！`, 'farming', 'skill');
-      UI && UI.cropGrown(slot, Items[seed.crop]);
+      Game.stats.harvests++;
+      gainXp('puyi', crop.xp || 10);
+      recordObject(seed.crop, 1);
+      if (chance(0.25)) giveItem(f.seedId, 1, false);
+      log(`🌾 田地${slotIdNum(slot)} 收获 ${crop.name}`, 'puyi', 'skill');
+      UI && UI.cropGrown(slot, crop);
       delete Game.farms[slot];
       grew.push(slot);
     }
   }
   return grew;
 }
-// 离线时按经过的秒数追赶作物生长
 function farmCatchUp(seconds){
   if (seconds > 0 && Object.keys(Game.farms).length) farmTick(seconds);
 }
-function slotIdNum(slot){ return parseInt(slot.replace('farm',''))+1; }
+function slotIdNum(slot){ return parseInt(String(slot).replace('farm',''))+1; }
+function plantSeed(plotId, seedId){
+  const seed = Items[seedId];
+  if (!seed || !seed.crop){ UI && UI.toast('此非嘉种'); return false; }
+  if (levelOf('puyi') < (seed.lvl||1)){ UI && UI.toast(`🔒 需圃艺 ${seed.lvl} 级`); return false; }
+  if ((Game.inventory[seedId]||0) <= 0){ UI && UI.toast('行囊中没有此种'); return false; }
+  if (Game.farms[plotId]){ UI && UI.toast('此田已有作物'); return false; }
+  Game.inventory[seedId]--;
+  if (Game.inventory[seedId]<=0) delete Game.inventory[seedId];
+  Game.farms[plotId] = { seedId, remain: seed.grow||10, grow: seed.grow||10 };
+  saveGame();
+  UI && UI.toast(`🌱 已植 ${seed.name}`);
+  return true;
+}
+window.plantSeed = plantSeed; window.farmCatchUp = farmCatchUp;
 
-// ---------- 加工配方执行 ----------
+// ---------- 制作 ----------
+function mapRecipeSkill(type){ return RECIPE_SKILL[type] || 'zhiqi'; }
 function scaleCost(cost, mult){ return cost.map(([id,q])=>[id, q*mult]); }
 function processRecipe(recipe, count){
-  if (!canAfford(scaleCost(recipe.cost, count))) { UI && UI.toast('原料不足'); return false; }
-  const base = recipe;
-  payCost(scaleCost(base.cost, count));
-  giveItem(base.out, base.qty*count, false); // 加工产物进背包
-  gainXp(base.type==='cook' ? 'cooking' : mapRecipeSkill(base.type), base.xp*count);
-  log(`✓ 制作 ${Items[base.out].name} ×${base.qty*count}`, 'good', 'skill');
-  UI && UI.actionFeedback(mapRecipeSkill(base.type), Items[base.out].icon, base.qty*count);
-  // 锻造 / 打造装备：额外播放抡锤打铁演出（金属类用铁锤，弓弩/法杖用木槌）
-  if ((base.type === 'smith' || (base.type === 'fletch' && Items[base.out].equip)) && UI && UI.forgeShow){
-    UI.forgeShow(Items[base.out], { heavy: !!Items[base.out].equip, emoji: base.type==='smith' ? '🔨' : '🪵' });
+  count = Math.max(1, count||1);
+  // 北次一经「生食不火」：该地不用火，燔燎(fanliao)与调鼎(diaoding)不可为
+  if ((recipe.type === 'burn' || recipe.type === 'cook')){
+    const rg = regionOf(Game.node);
+    if (rg && String(rg.regionId).indexOf('beishan-1') === 0){
+      UI && UI.toast('🔥 北次一经生食不火——此地不用火，燔燎／调鼎不可为');
+      return false;
+    }
+  }
+  if (!canAfford(scaleCost(recipe.cost, count))){ UI && UI.toast('原料不足'); return false; }
+  payCost(scaleCost(recipe.cost, count));
+  const skillId = mapRecipeSkill(recipe.type);
+  let outQty = recipe.qty * count;
+  if (recipe.type === 'cook'){ // 赤鱬「不疥」：烹饪并出
+    const extra = deployedBonuses().cookQty;
+    if (extra > 0 && chance(extra)) outQty += 1;
+  }
+  giveItem(recipe.out, outQty, false);
+  Game.stats.crafts += count;
+  gainXp(skillId, recipe.xp * count);
+  recordObject(recipe.out, count);
+  log(`✓ 制 ${Items[recipe.out].name} ×${outQty}`, 'good', 'skill');
+  UI && UI.actionFeedback(skillId, Items[recipe.out].icon, outQty);
+  if ((recipe.type === 'smith' || (recipe.type === 'fletch' && Items[recipe.out].equip)) && UI && UI.forgeShow){
+    UI.forgeShow(Items[recipe.out], { heavy: !!Items[recipe.out].equip, emoji: recipe.type==='smith' ? '⚒️' : '🪶' });
   }
   return true;
 }
-function mapRecipeSkill(type){
-  return { smith:'smithing', craft:'crafting', fletch:'fletching', cook:'cooking', runecrafting:'runecrafting', herblore:'herblore' }[type] || 'crafting';
+window.processRecipe = processRecipe;
+
+// ---------- 祠祀 ----------
+function performRite(riteId){
+  const rec = Recipes.find(r=>r.type==='rite' && r.out===riteId);
+  const def = RITES[riteId];
+  if (!rec || !def) return false;
+  if (!canAfford(rec.cost)){ UI && UI.toast('祠礼材料不备'); return false; }
+  payCost(rec.cost);
+  const mult = Game.buildings.citan ? 1.5 : 1;
+  gainXp('jisi', def.xp * mult);
+  Game.stats.rites++;
+  if (def.regionId){
+    Game.rites = Game.rites || {};
+    Game.rites[def.regionId] = gameTime() + def.dur;
+  }
+  if (def.deity) recordObject(def.deity, 1);
+  const r = def.regionId ? regionOf(def.regionId) : null;
+  if (r){
+    log(`🕯️ 行${Items[riteId].name}：${r.regionName}之神，其域产出 +${Math.round(def.yieldBonus*mult*100)}%（${Math.round(def.dur/3600)} 小时）`, 'gold', 'sys');
+    UI && UI.toast(`🕯️ ${Items[riteId].name} 已成\n${r.regionName}产出 +${Math.round(def.yieldBonus*mult*100)}%`);
+  } else {
+    log(`🕯️ ${Items[riteId].name}：${(Items[riteId]||{}).note||''}`, 'gold', 'sys');
+    UI && UI.toast(`🕯️ ${Items[riteId].name}`);
+  }
+  saveGame();
+  return true;
+}
+function regionRiteBonus(regionId){
+  const until = (Game.rites||{})[regionId];
+  if (!until || until <= gameTime()) return 0;
+  const def = Object.values(RITES).find(d=>d.regionId===regionId);
+  return def ? def.yieldBonus * (Game.buildings.citan ? 1.5 : 1) : 0;
+}
+window.performRite = performRite; window.regionRiteBonus = regionRiteBonus;
+
+// ---------- 观象 / 观瑞 ----------
+function startObserve(siteId){
+  const site = OBSERVE_SITES[siteId];
+  if (!site) return false;
+  const n = nodeOf(site.nodeId);
+  if (!n || !nodeUnlocked(n)){ UI && UI.toast('🔒 ' + (n ? nodeLockReason(n) : '此地不明')); return false; }
+  if (Game.node !== site.nodeId){ UI && UI.toast(`需先往${n.name}`); return false; }
+  Game.activity = { kind:'observe', siteId, nodeId:site.nodeId, src:'manual' };
+  if (typeof pauseQueue === 'function') pauseQueue('观象');
+  activityProgress = 0;
+  saveGame();
+  UI && UI.refreshActivity();
+  return true;
+}
+function doObserve(siteId){
+  const site = OBSERVE_SITES[siteId];
+  if (!site) return;
+  const n = nodeOf(site.nodeId);
+  const first = !Game.observed[siteId];
+  Game.observed[siteId] = true;
+  const divB = 1 + (divMult()-1)*0.5;
+  gainXp('guanxiang', (first ? 250 + (n?n.unlockLevel:0)*4 : 25) * divB);
+  Game.stats.observes++;
+  recordObject(site.nodeId, 1);
+  if (first){
+    log(`🌅 ${site.kind}·${site.name}：${site.gain}`, 'gold', 'skill');
+    UI && UI.toast(`🌅 ${site.kind}·${site.name}\n${site.gain}`);
+  } else {
+    UI && UI.log(`🌅 又观${site.name}`, 'guanxiang', 'skill');
+  }
+  // 观瑞：初见得瑞羽（凤皇羽 / 鹓雏羽）
+  const plume = { danxue:'fenghuangyu', nanyu:'yuanchuyu' }[siteId];
+  if (site.kind === '观瑞'){
+    if (plume && first){ giveItem(plume, 1, false); log(`🪽 得 ${Items[plume].name}`, 'gold', 'skill'); }
+    activateOmen('fenghuang');   // 见凤皇/鹓雏 → 天下安宁
+  }
+  saveGame();
+}
+window.startObserve = startObserve; window.doObserve = doObserve;
+
+// ---------- 谒见（神祇） ----------
+function startAudience(nodeId){
+  const site = AUDIENCE_SITES[nodeId];
+  if (!site) return false;
+  const n = nodeOf(nodeId);
+  if (!n || !nodeUnlocked(n)){ UI && UI.toast('🔒 ' + (n ? nodeLockReason(n) : '此地不明')); return false; }
+  if (Game.node !== nodeId){ UI && UI.toast(`需先往${n.name}`); return false; }
+  Game.activity = { kind:'audience', nodeId, src:'manual' };
+  if (typeof pauseQueue === 'function') pauseQueue('谒见');
+  activityProgress = 0;
+  saveGame();
+  UI && UI.refreshActivity();
+  return true;
+}
+function doAudience(nodeId){
+  const site = AUDIENCE_SITES[nodeId];
+  if (!site) return;
+  const n = nodeOf(nodeId);
+  let recorded = 0;
+  for (const d of site.deities){
+    const r = addRecord(d.id, 1);
+    if (r.first){
+      recorded++;
+      gainXp('zhulu', 60);
+      log(`🕯️ 谒见${d.name}：${d.form || d.note || '神祇入录'}`, 'gold', 'skill');
+      UI && UI.toast(`🕯️ 谒见 ${d.name}`);
+    }
+  }
+  gainXp('jisi', 200 + (n ? n.unlockLevel*4 : 0));
+  gainXp('zhulu', 20);
+  if (!recorded) UI && UI.log('🕯️ 再谒山川之神', 'jisi', 'skill');
+  saveGame();
+}
+window.startAudience = startAudience; window.doAudience = doAudience;
+
+// ---------- 养成（峚山丹木五岁 / 北山器酸三岁 / 北山精卫填海） ----------
+function growState(siteId){
+  if (siteId === 'mishan') return Game.danmu;
+  if (!Game.grow) Game.grow = {};
+  if (!Game.grow[siteId] || typeof Game.grow[siteId].stage !== 'number') Game.grow[siteId] = { stage:0, done:0 };
+  return Game.grow[siteId];
+}
+function startGrow(siteId){
+  const site = GROW_SITES[siteId];
+  if (!site) return false;
+  const n = nodeOf(site.nodeId);
+  if (!n || !nodeUnlocked(n)){ UI && UI.toast('🔒 ' + (n ? nodeLockReason(n) : '此地不明')); return false; }
+  if (Game.node !== site.nodeId){ UI && UI.toast(`需先往${n.name}`); return false; }
+  const st = growState(siteId);
+  if ((st.stage||0) >= site.stages){ UI && UI.toast(site.name + '已成，先取其实'); return false; }
+  if (!canAfford(site.cost)){ UI && UI.toast(siteId==='mishan' ? '需玉膏以灌' : '资材不足，需先备料'); return false; }
+  Game.activity = { kind:'grow', siteId, nodeId:site.nodeId, src:'manual' };
+  if (typeof pauseQueue === 'function') pauseQueue('灌木');
+  activityProgress = 0;
+  saveGame();
+  UI && UI.refreshActivity();
+  return true;
+}
+function doGrow(siteId){
+  const site = GROW_SITES[siteId];
+  if (!site) return;
+  const st = growState(siteId);
+  if ((st.stage||0) >= site.stages) return;
+  if (!canAfford(site.cost)){ UI && UI.toast('资材不足，停灌'); Game.activity = null; return; }
+  payCost(site.cost);
+  st.stage++;
+  gainXp('puyi', 400 + st.stage*120);
+  gainXp('zhulu', 40);
+  if (st.stage >= site.stages){
+    for (const [id, qty] of Object.entries(site.reward)) giveItem(id, qty, false);
+    st.stage = 0;
+    st.done = (st.done||0) + 1;
+    recordObject(site.nodeId, 1);
+    const got = Object.keys(site.reward).map(id => (Items[id] ? Items[id].name : id)).join('·') || '养成物';
+    log(`🌳 ${site.name}乃成：得 ${got}`, 'gold', 'skill');
+    UI && UI.toast(`🌳 ${site.name}乃成！\n得 ${got}`);
+  } else {
+    log(`🌱 灌${site.name}一阶（${st.stage}/${site.stages}）`, 'puyi', 'skill');
+    UI && UI.toast(`🌱 ${site.name} ${st.stage}/${site.stages}`);
+  }
+  saveGame();
+}
+window.startGrow = startGrow; window.doGrow = doGrow;
+
+// ---------- 卜筮 ----------
+function divine(){
+  if ((Game.inventory.jian||0) < 1){ UI && UI.toast('卜筮需 白菅×1'); return null; }
+  Game.inventory.jian--;
+  if (Game.inventory.jian<=0) delete Game.inventory.jian;
+  const wise = isWise();
+  const lucky = wise ? true : chance(0.6);
+  const divB = divMult();
+  gainXp('bushi', 60 * divB);
+  Game.stats.divines++;
+  let result;
+  if (lucky){
+    const kind = chance(0.5) ? 'xp' : 'gather';
+    result = { lucky:true, kind, value:0.10, dur:600 };
+    Game.buff = { itemId:'__divine', def:{ name: wise?'不惑之吉':'卜吉', kind, dur:600, [kind==='xp'?'xpBonus':'g']:0.10 }, remaining:600, dur:600 };
+    if (kind === 'gather') Game.buff.def.gather = 0.10;
+    if (kind === 'xp') Game.buff.def.xpBonus = 0.10;
+    if (typeof UI !== 'undefined') UI.lastDivine = result;
+    log(`🎋 卜之吉：${kind==='xp'?'诸技经验 +10%':'采集速度 +10%'}（600s）`, 'gold', 'sys');
+    UI && UI.toast(`🎋 卜之吉\n${kind==='xp'?'经验 +10%':'采集 +10%'} 600s`);
+  } else {
+    result = { lucky:false };
+    log('🎋 卜之不吉，宜静候时机', 'gold', 'sys');
+    UI && UI.toast('🎋 卜之不吉');
+  }
+  saveGame();
+  return result;
+}
+window.divine = divine;
+
+// ---------- 营造 ----------
+function buildStructure(id){
+  const b = BUILDINGS[id];
+  if (!b) return false;
+  if (Game.buildings[id]){ UI && UI.toast('早已营造完毕'); return false; }
+  if (levelOf('yingyi') < b.lvl){ UI && UI.toast(`🔒 需营邑 ${b.lvl} 级`); return false; }
+  if (!canAfford(b.cost)){ UI && UI.toast('材用不足'); return false; }
+  payCost(b.cost);
+  Game.buildings[id] = true;
+  gainXp('yingyi', b.xp);
+  log(`🏘️ 营造${b.name}：${b.desc}`, 'gold', 'sys');
+  UI && UI.toast(`🏘️ ${b.name} 已成\n${b.desc}`);
+  saveGame();
+  return true;
+}
+window.buildStructure = buildStructure;
+
+// ===== 战斗（讨伐 · 五行相克） =====
+function playerEl(){ return document.getElementById('playerFighter'); }
+function monsterEl(){ return document.getElementById('monsterFighter'); }
+
+function combatMode(){
+  if (Game.combat) return Game.combat.style;
+  return preferredStyle();
+}
+function styleAvailable(s){
+  if (s === 'zhu') return true;                                   // 祝术不藉兵器
+  if (s === 'ranged') return !!(Game.gear.weapon && Game.gear.weapon.ranged);
+  if (s === 'attack') return !!(Game.gear.weapon && !Game.gear.weapon.ranged);
+  return false;
+}
+const STYLE_NAMES = { auto:'自动', attack:'近战', ranged:'远程', zhu:'祝术' };
+function styleLabel(v){ return STYLE_NAMES[v] || STYLE_NAMES.auto; }
+function preferredStyle(){
+  const pref = Prefs.stylePref || 'auto';
+  if (pref !== 'auto' && styleAvailable(pref)) return pref;
+  if (styleAvailable('ranged')) return 'ranged';
+  if (styleAvailable('attack')) return 'attack';
+  return 'zhu';
+}
+function setCombatStyle(v){
+  Prefs.stylePref = (v==='attack'||v==='ranged'||v==='zhu') ? v : 'auto';
+  saveGame();
+  log(`🔀 战斗风格：${styleLabel(Prefs.stylePref)}（下一场生效）`, 'gold', 'sys');
+  UI && UI.toast(`战斗风格：${styleLabel(Prefs.stylePref)}`);
+  return Prefs.stylePref;
+}
+function setZhuEl(el){
+  if (!TUNING.ELEMENTS.includes(el)) return;
+  Prefs.zhuEl = el;
+  saveGame();
+  log(`📿 祝术主五行改为「${el}」`, 'gold', 'sys');
+  UI && UI.toast(`祝术主五行：${el}`);
+}
+window.combatMode = combatMode; window.styleAvailable = styleAvailable; window.styleLabel = styleLabel;
+window.preferredStyle = preferredStyle; window.setCombatStyle = setCombatStyle; window.setZhuEl = setZhuEl;
+
+function playerElement(){
+  const style = combatMode();
+  if (style === 'zhu') return Prefs.zhuEl;
+  const w = Game.gear.weapon;
+  if (w && w.el) return w.el;
+  if (style === 'ranged' && Game.gear.quiver) return Game.gear.quiver.el || '金';
+  return '金';
+}
+function playerWeaponDmg(){
+  const style = combatMode();
+  if (style === 'zhu'){
+    let d = 4 + levelOf('zhu')*0.9;
+    if (Game.gear.charm && Game.gear.charm.divBonus) d += 4;   // 玉符聊作施法之助
+    return d;
+  }
+  let dmg = 0;
+  const w = Game.gear.weapon;
+  if (w) dmg += w.dmg;
+  if (style === 'ranged' && Game.gear.quiver) dmg += Game.gear.quiver.dmg||0;
+  return dmg;
+}
+function playerDamageRange(){
+  const style = combatMode();
+  const stat = style==='ranged' ? levelOf('she') : style==='zhu' ? levelOf('zhu') : levelOf('bing');
+  let dmg = playerWeaponDmg() + stat*1.2;
+  const beast = Game.combat ? Monsters[Game.combat.monsterId] : null;
+  if (beast){
+    dmg *= wuxingMult(playerElement(), beast.el);
+    if (style === 'zhu' && wuxingSheng(playerElement(), beast.el)) dmg *= TUNING.WUXING.SHENG;
+  }
+  dmg *= dmgMult();
+  return { lo: Math.max(1, Math.floor(dmg*0.6)), hi: Math.max(1, Math.floor(dmg*1.4)) };
+}
+function playerAttackInterval(){
+  const skill = combatMode();
+  let base = skill==='ranged' ? 2.4 : skill==='zhu' ? 3.2 : 2.8;
+  const lvl = skill==='ranged' ? levelOf('she') : skill==='zhu' ? levelOf('zhu') : levelOf('bing');
+  base -= lvl*0.008;
+  return Math.max(1.5, base);
+}
+function playerEvasion(){
+  return Math.min(0.5, (Game.gear.armor ? 0.04 : 0) + levelOf('bing')*0.0015 + levelOf('ming')*0.001);
+}
+function totalDefence(){
+  let d = Game.gear.armor ? (Game.gear.armor.def||0) : 0;
+  d += levelOf('ming')*0.2;
+  d += defBonus();
+  return d;
+}
+function playerMaxHp(){
+  return Math.floor(20 + levelOf('ming')*4);
+}
+function monsterInterval(m, c){
+  let base = Math.max(2.0, 3.2 - m.hp*0.002);
+  if (m.special && m.special.enrage && c && c.monsterHp < m.hp*0.5) base *= (1 - m.special.enrage); // 封豨狂暴
+  return Math.max(1.2, base);
 }
 
-// 战斗 Tick
 function combatTick(elapsed){
   if (!Game.combat) return;
   const c = Game.combat;
   const m = Monsters[c.monsterId];
-  if (!m) { Game.combat=null; return; }
-  // 玩家进攻间隔
+  if (!m){ Game.combat = null; return; }
+  // 蛇毒：持续掉血
+  if (c.poison && c.poison.until > gameTime()){
+    c.poisonAcc = (c.poisonAcc||0) + elapsed;
+    while (c.poisonAcc >= 1){
+      c.poisonAcc -= 1;
+      c.playerHp -= c.poison.dmg;
+      Game.stats.damageTaken += c.poison.dmg;
+      UI && UI.floatText(playerEl(), `☠️ -${c.poison.dmg}`, '#9b59b6');
+    }
+    if (c.playerHp <= 0){ onPlayerDeath(c, m); return; }
+  } else if (c.poison){ delete c.poison; }
+  // 不可杀：缠斗 20 秒后遁去
+  if (m.unkillable){
+    c.flee = (c.flee||0) + elapsed;
+    if (c.flee >= 20){
+      recordObject(m.id, 1);
+      log(`🐾 ${m.name}「不可杀也」，遁去矣`, 'gold', 'combat');
+      UI && UI.toast(`🐾 ${m.name} 不可杀，遁去`);
+      Game.combat = null;
+      return;
+    }
+  }
+  // 玩家进攻
   const atkSpeed = Math.max(0.2, playerAttackInterval());
   c.timer = (c.timer||0) + elapsed;
-  // 攻击
-  while (c.timer >= atkSpeed && c.monsterHp > 0 && c.playerHp > 0){
+  let spin = 0;
+  while (c.timer >= atkSpeed && c.monsterHp > 0 && c.playerHp > 0 && spin++ < 64){
     c.timer -= atkSpeed;
     doPlayerAttack(c, m);
   }
-  if (c.monsterHp <= 0){ meetKill(c,m); return; }
-  // 迟缓药剂计时
-  if (c.slow){
-    c.slow.remaining -= elapsed;
-    if (c.slow.remaining <= 0){
-      delete c.slow;
-      log(`💤 迟缓效果结束，${m.name} 恢复正常速度`, 'gold', 'combat');
-    }
-  }
-  // 怪物攻击间隔
+  if (c.monsterHp <= 0){ meetKill(c, m); return; }
+  // 怪物进攻
   const mSpeed = Math.max(0.2, monsterInterval(m, c));
   c.maxtimer = (c.maxtimer||0) + elapsed;
-  while (c.maxtimer >= mSpeed && c.playerHp > 0){
+  spin = 0;
+  while (c.maxtimer >= mSpeed && c.playerHp > 0 && spin++ < 64){
     c.maxtimer -= mSpeed;
     doMonsterAttack(c, m);
   }
-  // Boss 专属技能：独立计时，命中更疼且部分忽略防御
-  if (m.special && c.playerHp > 0 && c.monsterHp > 0){
+  // Boss 专属技能
+  if (m.special && m.special.every > 0 && c.playerHp > 0 && c.monsterHp > 0){
     c.spec = (c.spec||0) + elapsed;
-    if (c.spec >= (m.special.every||10)){
-      c.spec = 0;
-      doMonsterSpecial(c, m);
-    }
+    if (c.spec >= m.special.every){ c.spec = 0; doMonsterSpecial(c, m); }
   }
-  // 死亡只在这里结算一次，避免重复计数
-  if (c.playerHp <= 0){ onPlayerDeath(c,m); }
+  if (c.playerHp <= 0) onPlayerDeath(c, m);
 }
 
-// ---------- 战斗道具（非回血，作用于战场状态）----------
-function useCombatItem(id){
-  const it = Items[id];
-  if (!it || !it.combatUse){ UI && UI.toast('该物品不能这样使用'); return false; }
-  if (!Game.combat){ UI && UI.toast('💤 这类道具只能在战斗中使用'); return false; }
-  if ((Game.inventory[id]||0) <= 0){ UI && UI.toast('背包里没有该物品'); return false; }
-  if (it.combatUse === 'slow'){
-    Game.inventory[id]--;
-    if (Game.inventory[id] <= 0) delete Game.inventory[id];
-    const c = Game.combat, m = Monsters[c.monsterId];
-    const mult = it.slowMult || 0.5, dur = it.slowDur || 10;
-    c.slow = { remaining: dur, mult };
-    UI && UI.floatText(monsterEl(), `💤 ${it.name}`, '#8b9dff');
-    UI && UI.toast(`💤 ${m.name} 攻击间隔 +${Math.round(mult*100)}%（${dur}s）`);
-    log(`💤 泼洒 ${it.name}：${m.name} 攻击变慢`, 'gold', 'combat');
-    saveGame();
-    return true;
-  }
-  return false;
-}
-window.useCombatItem = useCombatItem;
-
-// Boss 专属技能：周期性释放，伤害更高且部分穿透防御
-function doMonsterSpecial(c, m){
-  const sp = m.special;
-  if (!sp) return;
-  if (chance(playerEvasion())){ UI && UI.floatText(playerEl(), `💨 躲开 ${sp.name}`, '#8b96ac'); return; }
-  const def = totalDefence() * (1 - (sp.pierce||0));
-  let dmg = roll(1, Math.max(1, m.atk*(sp.dmg||1.5) - def*0.3));
-  c.playerHp -= dmg;
-  c.dmgIn = (c.dmgIn||0) + dmg;
-  Game.stats.damageTaken = (Game.stats.damageTaken||0) + dmg;
-  UI && UI.hit(playerEl(), `-${dmg}`, '#ff8800');
-  UI && UI.floatText(monsterEl(), `💥 ${sp.name}`, '#ff9f43');
-  log(`💥 ${m.name} 使出 ${sp.name}！${dmg} 点${sp.pierce?'穿透':'重'}伤害`, 'bad', 'combat');
-  if (sp.healPct){
-    const heal = Math.floor(m.hp * sp.healPct);
-    const before = c.monsterHp;
-    c.monsterHp = Math.min(m.hp, c.monsterHp + heal);
-    const gained = Math.max(0, c.monsterHp - before);
-    if (gained){ UI && UI.floatText(monsterEl(), `+${gained} ❤️`, '#58b368'); log(`🩸 ${m.name} 汲取 ${gained} 点生命`, 'bad', 'combat'); }
-  }
-  // 同样触发自动进食
-  if (c.playerHp > 0 && c.playerHp <= playerMaxHp() * Game.autoEatThreshold) autoEat(c, playerMaxHp());
-}
-
-function playerAttackInterval(){
-  const skill = combatMode();
-  let base = 2.8;
-  if (skill==='ranged') base = 2.4;
-  if (skill==='magic') base = 3.2;
-  // 攻速随等级略提升
-  base -= levelOf(skill)*0.008;
-  return Math.max(1.6, base);
-}
-function monsterInterval(m, c){
-  const base = Math.max(2.0, 3.2 - m.hp*0.002);
-  // 迟缓药剂：拉长怪物攻击间隔（一次性道具，战斗内生效一段时间）
-  const slow = (c && c.slow && c.slow.remaining > 0) ? (c.slow.mult||0) : 0;
-  return Math.max(2.0, base * (1 + slow));
-}
-function combatMode(){
-  // 战斗中进行风格固定；未战斗时按玩家偏好（不可用时自动回落）
-  if (Game.combat) return Game.combat.style;
-  return preferredStyle();
-}
-// 某种风格是否有对应武器（不校验弹药：箭矢耗尽由 startCombat 回退近战或拒绝开战）
-function styleAvailable(s){
-  if (s==='magic')  return !!Game.gear.magic;
-  if (s==='ranged') return !!Game.gear.bow;
-  if (s==='attack') return !!Game.gear.weapon;
-  return false;
-}
-const STYLE_NAMES = { auto:'自动', attack:'近战', ranged:'远程', magic:'魔法' };
-function styleLabel(v){ return STYLE_NAMES[v] || STYLE_NAMES.auto; }
-// 未战斗时的风格选择：玩家指定优先，否则按 远程 → 魔法 → 近战 回落
-function preferredStyle(){
-  const pref = Game.stylePref || 'auto';
-  if (pref !== 'auto' && styleAvailable(pref)) return pref;
-  if (styleAvailable('ranged')) return 'ranged';
-  if (styleAvailable('magic'))  return 'magic';
-  return 'attack';
-}
-// 玩家在战斗页切换风格（下一场战斗生效）
-function setCombatStyle(v){
-  Game.stylePref = (v==='attack' || v==='ranged' || v==='magic') ? v : 'auto';
-  saveGame();
-  log(`🔀 战斗风格切换为 ${styleLabel(Game.stylePref)}（下一场生效）`, 'gold', 'sys');
-  UI && UI.toast(`战斗风格：${styleLabel(Game.stylePref)}`);
-  return Game.stylePref;
-}
-window.setCombatStyle = setCombatStyle;
-window.styleAvailable = styleAvailable;
-window.preferredStyle = preferredStyle;
-window.styleLabel = styleLabel;
-
-function playerWeaponDmg(){
-  let dmg = 0;
-  const w = Game.gear.weapon;   // 近战
-  const bow = Game.gear.bow || Game.gear.magic; // 远程/魔法
-  const style = combatMode();
-  if (style==='attack'){ if (w) dmg += w.dmg; }
-  else if (style==='ranged'){ if (bow) dmg += bow.dmg; if (Game.gear.arrow) dmg += Game.gear.arrow.dmg||0; }
-  else if (style==='magic'){ if (bow) dmg += bow.dmg; if (Game.gear.arrow) dmg += (Game.gear.arrow.dmg||0); dmg += Math.floor(levelOf('magic')*0.5)+2; }
-  // 指环/护符加成
-  if (Game.gear.ring) dmg += Game.gear.ring.dmg||0;
-  if (Game.gear.amulet && Game.gear.amulet.dmg) dmg += Game.gear.amulet.dmg;
-  return dmg;
-}
-
-function playerDamageRange(){
-  let dmg = playerWeaponDmg();
-  const style = combatMode();
-  // 力量/远程技能加成
-  const stat = style==='ranged' ? levelOf('ranged') : (style==='magic' ? levelOf('magic') : levelOf('strength'));
-  dmg += Math.floor(stat*0.35);
-  dmg += levelOf('attack')*0.1;
-  dmg = dmg * dmgMult();
-  return { lo: Math.max(1, Math.floor(dmg*0.6)), hi: Math.max(1, Math.floor(dmg*1.4)) };
-}
-function playerEvasion(){
-  return Math.min(0.55, levelOf('defence')*0.004 + (Game.gear.legs?Game.gear.legs.def*0.0005:0));
-}
-function totalDefence(){
-  let d = 0;
-  for (const slot of ['helm','body','legs','boots']){
-    if (Game.gear[slot]) d += Game.gear[slot].def;
-  }
-  if (Game.gear.amulet) d += Game.gear.amulet.def||0;
-  return d + levelOf('defence')*0.2 + defBonus();
-}
 function doPlayerAttack(c, m){
   const style = combatMode();
-  // 远程需要箭矢：每次攻击消耗 1 支；耗尽时优先切换近战，否则停止战斗
-  if (style==='ranged'){
-    const arrow = Game.gear.arrow;
+  if (style === 'ranged'){
+    const arrow = Game.gear.quiver;
     if (!arrow || (Game.inventory[arrow.id]||0) <= 0){
-      if (Game.gear.weapon){
-        c.style = 'attack';
-        log('🏹 箭矢耗尽，自动切换为近战', 'bad', 'combat');
-      } else {
-        Game.combat = null; autoAttack = false;
-        UI && UI.toast('箭矢耗尽，无法继续战斗');
-        return;
-      }
+      if (styleAvailable('attack')){ c.style = 'attack'; log('🏹 矢尽，改用近战', 'bad', 'combat'); }
+      else { Game.combat = null; UI && UI.toast('矢尽，无以讨伐'); return; }
     } else {
       Game.inventory[arrow.id]--;
-      if (Game.inventory[arrow.id] <= 0){ delete Game.inventory[arrow.id]; Game.gear.arrow = null; }
+      if (Game.inventory[arrow.id] <= 0){ delete Game.inventory[arrow.id]; Game.gear.quiver = null; }
     }
   }
+  // 大风「飘风」：闪避窗口
+  if (c.dodgeUntil && c.dodgeUntil > gameTime() && chance(0.5)){
+    UI && UI.floatText(monsterEl(), '💨 风影闪避', '#8b96ac');
+    return;
+  }
+  // 猰貐「革甲」：受击叠破甲
+  let armorPierce = 0;
+  if (m.special && m.special.armor){
+    c.armorPierce = Math.min(0.6, (c.armorPierce||0) + 0.05);
+    armorPierce = m.special.armor * (1 - c.armorPierce);
+  }
   const range = playerDamageRange();
-  const dmg = roll(range.lo, range.hi);
-  const miss = chance(Math.max(0.02, 0.08 - levelOf('attack')*0.001));
+  let dmg = roll(range.lo, range.hi);
+  if (armorPierce > 0) dmg = Math.max(1, Math.floor(dmg * (1 - armorPierce)));
+  const fearPenalty = (c.fearUntil && c.fearUntil > gameTime()) ? 0.30 : 0;   // 西王母震慑
+  const miss = chance(Math.max(0.02, 0.08 - levelOf('bing')*0.001) + fearPenalty);
   if (miss){ UI && UI.floatText(monsterEl(), '未命中', '#8b96ac'); return; }
   c.monsterHp -= dmg;
   c.dmgOut = (c.dmgOut||0) + dmg;
   c.round = (c.round||0) + 1;
-  Game.stats.damageDealt = (Game.stats.damageDealt||0) + dmg;
-  Game.stats.hits = (Game.stats.hits||0) + 1;
-  gainXp(combatMode(), 4);
-  gainXp('combat', 3);
+  Game.stats.damageDealt += dmg;
+  Game.stats.hits++;
+  gainXp(style === 'zhu' ? 'zhu' : style === 'ranged' ? 'she' : 'bing', 4);
+  gainXp('taofa', 3);
   UI && UI.attackFx && UI.attackFx('player');
   UI && UI.hit(monsterEl(), `-${dmg}`, '#ff6b6b');
+  if (c.playerHp > 0 && c.playerHp <= playerMaxHp() * Prefs.autoEat) autoEat(c);
 }
 
 function doMonsterAttack(c, m){
   const maxHp = playerMaxHp();
-  const atkr = m.atk;
   const ev = playerEvasion() + 0.05;
-  if (chance(ev)) { UI && UI.floatText(playerEl(), '闪避', '#8b96ac'); return; }
+  if (chance(ev)){ UI && UI.floatText(playerEl(), '闪避', '#8b96ac'); return; }
   const def = totalDefence();
-  let dmg = roll(1, Math.max(1, atkr - def*0.3));
+  let dmg = roll(1, Math.max(1, m.atk - def*0.3));
   c.playerHp -= dmg;
   c.dmgIn = (c.dmgIn||0) + dmg;
-  Game.stats.damageTaken = (Game.stats.damageTaken||0) + dmg;
+  Game.stats.damageTaken += dmg;
+  gainXp('ming', 3);
   UI && UI.attackFx && UI.attackFx('monster');
   UI && UI.hit(playerEl(), `-${dmg}`, '#ff4444');
-  gainXp('defence', 4);
-  // 自动吃逻辑
-  if (c.playerHp > 0 && c.playerHp <= maxHp * Game.autoEatThreshold){
-    autoEat(c, maxHp);
-  }
+  if (c.playerHp > 0 && c.playerHp <= maxHp * Prefs.autoEat) autoEat(c);
 }
 
-function autoEat(c, maxHp){
-  // 候选：背包中所有可回血的食物/药水（熟食、可食用作物、治疗药水）
+function doMonsterSpecial(c, m){
+  const sp = m.special;
+  if (!sp) return;
+  if (sp.elementShift){
+    const els = TUNING.ELEMENTS;
+    m.el = els[(els.indexOf(m.el)+1) % els.length];
+    UI && UI.floatText(monsterEl(), `五行 → ${m.el}`, '#c39bd3');
+    log(`☯️ ${m.name} 阴阳嬗变，化为${m.el}属`, 'bad', 'combat');
+    return;
+  }
+  if (sp.dodge){
+    c.dodgeUntil = gameTime() + 8;
+    UI && UI.floatText(monsterEl(), `🌪️ ${sp.name}`, '#7fb3d5');
+    log(`🌪️ ${m.name} 起${sp.name}，身形难测`, 'bad', 'combat');
+    return;
+  }
+  if (sp.poison){
+    c.poison = { until: gameTime() + sp.poison.dur, dmg: sp.poison.dmg };
+    UI && UI.floatText(playerEl(), `☠️ ${sp.name}`, '#9b59b6');
+    log(`☠️ ${m.name} 施${sp.name}，持续掉血`, 'bad', 'combat');
+    return;
+  }
+  const def = totalDefence() * (1 - (sp.pierce||0));
+  if (sp.fear){                                     // 西王母「善啸」：震慑——命中降低
+    c.fearUntil = gameTime() + 8;
+    UI && UI.floatText(playerEl(), `😱 ${sp.name}`, '#c39bd3');
+  }
+  const hits = sp.hits || 1;
+  for (let i=0; i<hits; i++){
+    if (chance(playerEvasion())){ UI && UI.floatText(playerEl(), `💨 躲开 ${sp.name}`, '#8b96ac'); continue; }
+    const dmg = roll(1, Math.max(1, m.atk*(sp.dmg||1.5) - def*0.3));
+    c.playerHp -= dmg;
+    c.dmgIn = (c.dmgIn||0) + dmg;
+    Game.stats.damageTaken += dmg;
+    UI && UI.hit(playerEl(), `-${dmg}`, '#ff8800');
+  }
+  UI && UI.floatText(monsterEl(), `💥 ${sp.name}`, '#ff9f43');
+  log(`💥 ${m.name} 使出${sp.name}${hits>1?`（${hits} 连）`:''}`, 'bad', 'combat');
+  if (c.playerHp > 0 && c.playerHp <= playerMaxHp() * Prefs.autoEat) autoEat(c);
+}
+
+function autoEat(c){
   const candidates = [];
   for (const id in Game.inventory){
     const it = Items[id];
     if (!it || !it.heal || Game.inventory[id] <= 0) continue;
-    if (it.type==='cooked' || it.edible || it.type==='potion') candidates.push([id, it.heal]);
+    candidates.push([id, it.heal]);
   }
   if (!candidates.length) return;
   candidates.sort((a,b)=>b[1]-a[1]);
   const [id, heal] = candidates[0];
   Game.inventory[id]--;
   if (Game.inventory[id] <= 0) delete Game.inventory[id];
-  c.playerHp = Math.min(maxHp, c.playerHp + heal);
+  c.playerHp = Math.min(playerMaxHp(), c.playerHp + heal);
   UI && UI.floatText(playerEl(), `+${heal} ❤️`, '#58b368');
   UI && UI.toast(`🍖 自动进食 ${Items[id].name} +${heal}`);
 }
-function playerMaxHp(){
-  let hp = 20 + levelOf('combat')*3 + levelOf('defence')*2 + levelOf('strength');
-  // 里程碑：高阶技能提供额外的生命上限
-  const mu = milestonesUnlocked()||{};
-  if (mu.skills_20) hp += 10;
-  if (mu.skills_40) hp += 25;
-  // 顶级护符小幅提升生命
-  if (Game.gear.amulet && Game.gear.amulet.hp) hp += Game.gear.amulet.hp;
-  return Math.floor(hp);
-}
 
-function meetKill(c,m){
+function meetKill(c, m){
   const isBoss = !!m.boss;
   Game.stats.kills++;
   if (isBoss){
-    Game.stats.bossKills++;
-    UI && UI.log(`🏆 击败 Boss：${m.name}！`, 'gold', 'combat');
+    Game.stats.bossKills[m.id] = true;
+    UI && UI.log(`🏆 讨平 ${m.name}！`, 'gold', 'combat');
     UI && UI.bossKillFx(m);
-    if (m.coins){ Game.coins += m.coins; Game.stats.totalEarned += m.coins; }
-    // 首杀奖励
-    const fk = 'boss_'+c.monsterId;
-    if (m.firstReward && !Game.shopBought[fk]){
-      Game.shopBought[fk] = true;
-      const fr = m.firstReward;
-      if (fr.coins){ Game.coins += fr.coins; Game.stats.totalEarned += fr.coins; }
-      if (fr.ring && Items[fr.ring]) giveItem(fr.ring, 1, false);
-      UI && UI.log(`🌟 首杀 ${m.name}：额外 +${fr.coins} 金币${fr.ring?' + '+Items[fr.ring].name:''}！`, 'gold', 'combat');
-    }
+    if (m.coins){ Game.shells += m.coins; Game.stats.totalEarned += m.coins; }
   }
-  gainXp('combat', m.xp);
-  // 战利品
-  m.loot.forEach(([id,ch,qty])=>{
-    if (chance(ch)){
-      const n = roll(Math.max(1,qty), qty*3);
+  gainXp('taofa', m.xp);
+  gainXp('ming', Math.round(m.xp*0.3));
+  recordObject(m.id, 1);
+  // 战利品（权重公式，见 TUNING.DROP）
+  const tier = (Game.records[m.id]||{}).tier || 0;
+  const yieldB = 1 + globalYieldBonus() + deployedBonuses().loot;
+  for (const [id, base, qty] of m.loot){
+    let p = base * (1 + TUNING.DROP.LVL_COEF*(levelOf('taofa') - m.needLvl)) * (1 + TUNING.DROP.MAS_COEF*tier/4);
+    p = clamp(p * yieldB, 0.05, 0.95);
+    if (chance(p)){
+      const n = roll(1, Math.max(1, qty));
       giveItem(id, n, false);
       pushRecentLoot(id, n);
-      UI && UI.log(`⚔️ 战利品: ${Items[id].name} ×${n}`, 'gold', 'combat');
+      UI && UI.log(`⚔️ 获 ${Items[id].name} ×${n}`, 'gold', 'combat');
       UI && UI.lootFloat(id, n);
     }
-  });
+  }
+  if (isBoss && m.drop){
+    giveItem(m.drop, 1, false);
+    pushRecentLoot(m.drop, 1);
+    UI && UI.log(`🌟 得 ${Items[m.drop].name}`, 'gold', 'combat');
+  }
   Game.combat = null;
-  // 自动接下一场（普通怪自动连战，Boss 不自动重续）
-  if (!isBoss) startCombat(c.monsterId);
+  if (!isBoss) startCombat(c.monsterId);   // 自动接战下一只
 }
-// 最近战利品记录（战斗页「最近战利品」面板展示）
 function pushRecentLoot(itemId, qty){
   if (!itemId || !Items[itemId]) return;
   if (!Array.isArray(Game.recentLoot)) Game.recentLoot = [];
@@ -504,77 +945,153 @@ function pushRecentLoot(itemId, qty){
 }
 window.pushRecentLoot = pushRecentLoot;
 
-function onPlayerDeath(c,m){
+function onPlayerDeath(c, m){
   Game.stats.deaths++;
-  log(`💀 你被 ${m.name} 击败了！`, 'bad', 'combat');
+  log(`💀 汝为 ${m.name} 所败`, 'bad', 'combat');
   UI && UI.deathFloat();
   const lastId = c && c.monsterId;
   Game.combat = null;
-  autoAttack = false;
-  // 死亡后自动重开：稍作停顿后满血重新挑战同一怪物
-  if (Game.auto_revive && lastId && Monsters[lastId]){
+  if (Prefs.autoRevive && lastId && Monsters[lastId]){
     setTimeout(()=>{
-      if (!Game.auto_revive) return;
+      if (!Prefs.autoRevive) return;
       startCombat(lastId);
-      if (Game.combat){
-        autoAttack = true;
-        UI && UI.toast(`⚔️ 自动重新挑战 ${Monsters[lastId].name}`);
-      }
+      if (Game.combat) UI && UI.toast(`⚔️ 复讨 ${Monsters[lastId].name}`);
     }, 1500);
   }
 }
-function playerEl(){ return document.getElementById('playerFighter'); }
-function monsterEl(){ return document.getElementById('monsterFighter'); }
 
-// 开始战斗
 let autoAttack = false;
-function startCombat(monsterId){
+function startCombat(monsterId, opts){
   const m = Monsters[monsterId];
-  if (!m) return;
-  // 开始战斗会停止当前的采集/制作活动（同时暂停行动队列）
+  if (!m) return false;
+  const node = nodeOf(m.nodeId);
+  if (!node || !nodeUnlocked(node)){ UI && UI.toast('🔒 ' + (node ? nodeLockReason(node) : '此地不明')); return false; }
+  if (m.needLvl && levelOf('taofa') < m.needLvl){ UI && UI.toast(`🔒 需讨伐 ${m.needLvl} 级方可言 ${m.name}`); return false; }
   Game.activity = null;
-  if (typeof pauseQueue === 'function') pauseQueue('进入战斗');
+  if (typeof pauseQueue === 'function') pauseQueue('往讨');
   let style = combatMode();
-  // 远程校验：需要弓与箭矢；无箭矢但有近战武器时自动使用近战
-  if (style==='ranged'){
-    const hasBow = !!(Game.gear.bow || Game.gear.magic);
-    const hasAmmo = !!(Game.gear.arrow && (Game.inventory[Game.gear.arrow.id]||0) > 0);
-    if (!hasBow){ style = 'attack'; }
-    else if (!hasAmmo){
-      if (Game.gear.weapon){ style = 'attack'; UI && UI.toast('没有箭矢，使用近战战斗'); }
-      else { UI && UI.toast('需要装备箭矢才能远程战斗'); return false; }
-    }
+  if (style === 'ranged' && !styleAvailable('ranged')){
+    if (styleAvailable('attack')){ style = 'attack'; UI && UI.toast('无弓，以近战往讨'); }
+    else style = 'zhu';
   }
-  // Boss 门槛：战斗等级
-  if (m.needLvl && levelOf('combat') < m.needLvl){
-    UI && UI.toast(`🔒 需要 战斗 ${m.needLvl} 级才能挑战 ${m.name}`);
-    return false;
-  }
-  Game.combat = { monsterId, monsterHp:m.hp, playerHp:playerMaxHp(), timer:0, maxtimer:0, style,
-    dmgOut:0, dmgIn:0, round:0 };
+  if (style === 'attack' && !styleAvailable('attack')) style = 'zhu';
+  Game.combat = { monsterId, monsterHp:m.hp, playerHp:playerMaxHp(), timer:0, maxtimer:0, spec:0,
+    style, dmgOut:0, dmgIn:0, round:0, flee:0 };
   autoAttack = true;
   saveGame();
-  UI && UI.startCombat(m);
-  UI && UI.floatText(monsterEl(), m.boss ? '🦹 Boss 战！' : '⚔️ 开战', '#ffd166', !!m.boss);
+  UI && UI.startCombat(m, opts);
+  UI && UI.floatText(monsterEl(), m.boss ? '🦹 六凶之战！' : '⚔️ 往讨', '#ffd166', !!m.boss);
+  return true;
 }
+window.startCombat = startCombat;
 
-// ---------- 主 tick ----------
-// 后台策略：浏览器会把后台标签页的定时器限流甚至冻结，
-// 因此「真实流逝的时间」不能丢——少量欠账在本帧逐步补算，长时间空档按离线规则一次性结算。
-const FRAME_STEP   = 0.6;  // 单步推进上限（秒）：保持战斗 / 动效节奏细腻
-const CATCHUP_MAX  = 3;    // 战斗中的单帧补算上限（秒）：避免一次性爆出大量打击动效
-const CATCHUP_IDLE = 60;   // 采集 / 制作等非战斗活动的单帧补算上限（秒）
-const AWAY_MIN     = 60;   // 空档超过这个秒数就按补算规则结算（与 offlineProgress 同阈值）
+// 威胁评估：估算 dps 比
+function playerDpsEstimate(){
+  const range = playerDamageRange();
+  const avg = (range.lo + range.hi)/2;
+  return avg / Math.max(0.5, playerAttackInterval());
+}
+function threatOf(m){
+  const dps = playerDpsEstimate();
+  const hp = playerMaxHp();
+  const mDps = Math.max(1, m.atk - totalDefence()*0.3) * 0.6 / Math.max(1, monsterInterval(m, null));
+  const ratio = (dps*hp) / Math.max(1, mDps*m.hp);
+  if (ratio >= 1.6) return { level:'recommend', label:'✔ 推荐' };
+  if (ratio >= 0.7) return { level:'fair', label:'可讨' };
+  return { level:'danger', label:'⚠ 危险' };
+}
+window.playerDpsEstimate = playerDpsEstimate; window.threatOf = threatOf;
+
+// ---------- 御使 ----------
+const BEAST_BUFFS = {
+  shengsheng: { label:'狌狌·善走', gatherSpeed:0.06 },
+  baiyuan:    { label:'白猿', xp:0.02 },
+  lushu:      { label:'鹿蜀·宜子孙', farmSpeed:0.20 },
+  xuangui:    { label:'旋龟·不聋', div:0.10 },
+  lu:         { label:'鯥·无肿疾', hp:0.05 },
+  lei:        { label:'类·不妒', trade:0.05 },
+  boyi:       { label:'猼訑·不畏', def:4 },
+  yuyu:       { label:'𪁺𪁸·无卧', offline:0.05 },
+  jiuwei:     { label:'九尾狐·不蛊', loot:0.10 },
+  guanguan:   { label:'灌灌·不惑', div:0.06 },
+  chiru:      { label:'赤鱬·不疥', cookQty:0.10 },
+  lili:       { label:'狸力·土功', build:0.10 },
+  zhu:        { label:'鴸', xp:0.02 },
+  changyou:   { label:'长右·大水', gatherSpeed:0.04 },
+  huahuai:    { label:'猾褢·大繇', build:0.06 },
+  zhi:        { label:'彘', dmg:0.05 },
+  huan:       { label:'䍺·不可杀', def:2 },
+  gudiao:     { label:'蛊雕', dmg:0.08 },
+  quru:       { label:'瞿如', xp:0.02 },
+  hujiao:     { label:'虎蛟·不肿', heal:0.10 },
+  tuanyu:     { label:'鱄鱼', loot:0.04 },
+  yong:       { label:'颙', xp:0.03 },
+  fenghuang:  { label:'凤皇·安宁', yield:0.05 },
+  yuanchu:    { label:'鹓雏', xp:0.03 },
+  xi:         { label:'犀', hp:0.03 },
+  si:         { label:'兕', def:3 },
+  xiang:      { label:'象', hp:0.05 },
+  guainiao:   { label:'怪鸟', xp:0.01 },
+  guaishou:   { label:'怪兽', dmg:0.02 },
+  dashe:      { label:'大蛇', dmg:0.03 },
+};
+function deployableBeasts(){
+  return Object.values(Monsters).filter(m=>!m.boss && ((Game.records[m.id]||{}).tier||0) >= 3);
+}
+function deployBeast(beastId){
+  if (!Monsters[beastId]) return false;
+  const tier = (Game.records[beastId]||{}).tier || 0;
+  if (tier < 3){ UI && UI.toast('🔒 需著录至「通形」方可御使'); return false; }
+  const slots = beastSlots();
+  const used = Object.keys(Game.deployed).length;
+  const need = Monsters[beastId].pair ? 2 : 1;      // 蛮蛮「相得乃飞」：成对占两槽
+  if (used + need > slots){ UI && UI.toast(`御使槽位不足（需 ${need} 槽，余 ${slots-used}）`); return false; }
+  if (Object.values(Game.deployed).includes(beastId)){ UI && UI.toast('该异兽已在槽中'); return false; }
+  let idx = 0;
+  while (Game.deployed[idx]) idx++;
+  Game.deployed[idx] = beastId;
+  if (need === 2){                                 // 成对：写入相邻槽
+    let j = idx + 1;
+    while (Game.deployed[j]) j++;
+    Game.deployed[j] = beastId;
+  }
+  const def = BEAST_BUFFS[beastId] || genericBeastBuff(Monsters[beastId]);
+  log(`🐾 御使 ${Monsters[beastId].name}：${def?def.label:''}${need===2?'（相得乃飞）':''}`, 'good', 'sys');
+  UI && UI.toast(`🐾 御使 ${Monsters[beastId].name}${need===2?'（成对）':''}`);
+  saveGame();
+  return true;
+}
+function undeployBeast(idx){
+  const bid = Game.deployed[idx];
+  if (!bid) return false;
+  delete Game.deployed[idx];
+  // 成对御使（蛮蛮）：撤其一则全撤
+  if (Monsters[bid] && Monsters[bid].pair){
+    for (const k in Game.deployed) if (Game.deployed[k] === bid) delete Game.deployed[k];
+  }
+  saveGame();
+  return true;
+}
+function tickYushi(dt){
+  const n = Object.keys(Game.deployed).length;
+  if (n > 0) gainXp('yushi', 0.5 * n * dt);
+}
+window.BEAST_BUFFS = BEAST_BUFFS; window.deployableBeasts = deployableBeasts;
+window.deployBeast = deployBeast; window.undeployBeast = undeployBeast;
+
+// ---------- 主循环（后台补算） ----------
+const FRAME_STEP   = 0.6;
+const CATCHUP_MAX  = 3;
+const CATCHUP_IDLE = 60;
+const AWAY_MIN     = 60;
 let lastTick = Date.now();
-let pendingTime = 0;       // 待补算的时间（秒）
+let pendingTime = 0;
 function gameLoop(){
   const now = Date.now();
   let dt = (now - lastTick)/1000;
   lastTick = now;
-  if (!isFinite(dt) || dt < 0) dt = 0;      // 时钟回拨 / 首帧
+  if (!isFinite(dt) || dt < 0) dt = 0;
   pendingTime += dt;
-  // 本帧预算：正常帧只推一小步；被限流或挂起后则分批把欠账补上
-  // 战斗中的每补算秒会伴随打击飘字，因此上限更小；采集 / 制作可以更激进
   const cap = Game.combat ? CATCHUP_MAX : CATCHUP_IDLE;
   let budget = Math.min(pendingTime, cap);
   let guard = 0;
@@ -584,30 +1101,26 @@ function gameLoop(){
     pendingTime -= step;
     budget -= step;
   }
-  // 仍有大额欠账 → 标签页曾被冻结 / 最小化，按离线规则结算，避免整段进度丢失
   if (pendingTime >= AWAY_MIN){
     const away = pendingTime;
     pendingTime = 0;
-    if (typeof settleAway === 'function'){
-      const rec = settleAway(away);
-      if (rec && typeof UI !== 'undefined'){          // 补算可能有收获 / 经验，回来后立刻刷新
-        if (UI.refreshAll) UI.refreshAll();
-        if (typeof renderCurrent === 'function') renderCurrent();
-      }
+    const rec = settleAway(away);
+    if (rec && typeof UI !== 'undefined'){
+      if (UI.refreshAll) UI.refreshAll();
+      if (typeof renderCurrent === 'function') renderCurrent();
     }
   }
-  if (UI && UI.tickProgress) UI.tickProgress();   // 状态栏动作进度条
+  if (UI && UI.tickProgress) UI.tickProgress();
 }
-// 单步推进若干秒（所有随时间推进的结算集中在此，后台补算直接复用）
+let oneSecondAccum = 0, activityProgress = 0;
 function stepGame(dt){
-  if (Game.buff) tickBuffs(dt);   // 药水效果计时
+  if (Game.buff) tickBuffs(dt);
+  tickYushi(dt);
   oneSecondAccum += dt;
   while (oneSecondAccum >= 1){
     oneSecondAccum -= 1;
     onSecond();
   }
-  // 采集式活动用秒计数
-  // 行动队列：运行中时由队列决定当前动作
   if (Game.queueRunning && typeof ensureQueueActivity === 'function') ensureQueueActivity();
   if (Game.activity && Game.activity.kind && Game.activity.kind !== 'combat'){
     activityProgress += dt;
@@ -616,99 +1129,65 @@ function stepGame(dt){
     while (activityProgress >= interval && spin++ < 512){
       activityProgress -= interval;
       performAction(Game.activity);
+      if (!Game.activity) break;
     }
   }
   if (autoAttack && Game.combat) combatTick(dt);
 }
-let oneSecondAccum = 0, activityProgress = 0;
+let saveTick = 0;
 function onSecond(){
-  // 农牧
   if (Object.keys(Game.farms).length) farmTick(1);
   Game.stats.time++;
+  tickOmens();
+  checkMilestoneToast();
   saveTick++;
-  if (saveTick >= 15){ saveTick=0; saveGame(); }
+  if (saveTick >= 15){ saveTick = 0; saveGame(); }
 }
-let saveTick = 0;
 
-// 动作间隔
 function currentActionInterval(){
   const a = Game.activity; if (!a) return 1;
-  if (a.kind==='chop') return gatherInterval('axePower');
-  if (a.kind==='mine') return gatherInterval('pickPower');
-  if (a.kind==='fish') return fishingInterval();
-  if (['smith','craft','fletch','cook','rune','runecrafting','herblore'].includes(a.kind)) return 2.0;
-  return 1;
+  if (a.kind === 'gather') return gatherInterval(a.skill);
+  if (a.kind === 'observe') return TUNING.OBSERVE_SEC;
+  if (a.kind === 'audience') return TUNING.OBSERVE_SEC;
+  if (a.kind === 'grow') return (GROW_SITES[a.siteId]||{}).sec || 3600;
+  if (a.kind === 'craft'){
+    let base = 2.0;
+    const craftPenalty = omenMod('craft');        // 毕方「讹火」：制作效率 -20%
+    if (craftPenalty < 0) base *= (1 - craftPenalty);
+    return base;
+  }
+  let interval = 1;
+  const mv = omenMod('move');                       // 山𤟤「大风」：移动/巡历效率 -20%
+  if (mv < 0) interval *= (1 - mv);
+  return interval;
 }
 
-function fishingInterval(){
-  const power = Game.gear.rod ? (Game.gear.rod.rodPower||0) : 0;
-  return Math.max(2.5, 4.5 - power*0.15 - levelOf('fishing')*0.02);
-}
-
-// 执行一次动作
 function performAction(a){
   Game.stats.actions++;
-  // 记录产出增量（供行动队列统计任务进度）
   const produced = actionOutputId(a);
   const before = produced ? totalOf(produced) : 0;
   switch(a.kind){
-    case 'chop': doChop(a); break;
-    case 'mine': doMine(a); break;
-    case 'fish': doFish(a); break;
-    case 'smith': case 'craft': case 'fletch': case 'cook': case 'rune': case 'runecrafting': case 'herblore': doRecipeAction(a); break;
+    case 'gather':  doGather(a.itemId); break;
+    case 'craft':   doRecipeAction(a); break;
+    case 'observe': doObserve(a.siteId); Game.activity = null; break;
+    case 'audience': doAudience(a.nodeId);
+      if (typeof queueOnSpecialDone === 'function') queueOnSpecialDone(a); break;
+    case 'grow':    doGrow(a.siteId);
+      if (typeof queueOnSpecialDone === 'function') queueOnSpecialDone(a); break;
   }
   if (produced){
     const gained = totalOf(produced) - before;
     if (gained > 0 && typeof queueOnActionDone === 'function') queueOnActionDone(a, gained);
   }
 }
-// 当前动作的产出物品（采集=目标物，制作=配方产物）
 function actionOutputId(a){
   if (!a) return null;
   if (a.recipe) return a.recipe.out;
   if (a.itemId) return a.itemId;
   return null;
 }
-
-function doChop(a){
-  const item = Items[a.itemId];
-  const lvl = levelOf('woodcutting');
-  const req = item.lvl;
-  if (lvl < req){ Game.activity=null; return; }
-  const power = Game.gear.axe ? (Game.gear.axe.axePower||0) : 0;
-  const mult = 1 + power*0.02;
-  doActionDrop(item, 'woodcutting', mult);
-  // 特殊：若干情况下额外收益
-  if (chance(0.03 + levelOf('woodcutting')*0.0005)){
-    giveItem('string', 1, false);
-    UI && UI.log('🪵 你发现了一些细绳！', 'crafting', 'skill');
-  }
-}
-function doMine(a){
-  const item = Items[a.itemId];
-  if (levelOf('mining') < item.lvl){ Game.activity=null; return; }
-  const power = Game.gear.pickaxe ? (Game.gear.pickaxe.pickPower||0) : 0;
-  doActionDrop(item, 'mining', 1 + power*0.01);
-}
-function doFish(a){
-  const item = Items[a.itemId];
-  if (levelOf('fishing') < item.lvl){ Game.activity=null; return; }
-  // 特定鱼需要诱饵
-  const bait = FishBait[a.itemId];
-  if (bait && !canAfford(bait.map(x=>[x,1]))){ UI && UI.toast('缺少诱饵（原木）'); return; }
-  if (bait) takeItem(bait[0], 1, false);
-  doActionDrop(item, 'fishing', 1);
-}
-function doActionDrop(item, skillId, mult){
-  // 掉落 1-2 个
-  const qty = chance(0.25) ? 2 : 1;
-  giveItem(item.id, qty, false);
-  gainXp(skillId, item.xp * qty * mult);
-  UI && UI.log(`${actionIcon(skillId)} 获得 ${item.name} ×${qty}`, skillId, 'skill');
-  UI && UI.actionFeedback(skillId, item.icon, qty);
-}
 function doRecipeAction(a){
-  // 批量单次
+  if (!a.recipe) return;
   if (!canAfford(a.recipe.cost)){
     UI && UI.toast('原料不足，停止制作');
     Game.activity = null;
@@ -717,22 +1196,70 @@ function doRecipeAction(a){
   processRecipe(a.recipe, 1);
 }
 
-function stopActivity(){ Game.activity = null; autoAttack = false; }
-
-// 图标
-function actionIcon(skillId){
-  return { woodcutting:'🪓', mining:'⛏️', fishing:'🎣', smithing:'🔥', crafting:'🔨', fletching:'🏹', cooking:'🍳', runecrafting:'🔮', farming:'🌱', herblore:'🧪' }[skillId]||'➤';
+// ---------- 离线 / 后台结算 ----------
+function settleAway(seconds){
+  seconds = Math.max(0, Math.min(seconds, offlineCapHours()*3600));
+  if (seconds < 30) return null;
+  const eff = offlineEff();
+  const summary = { seconds, xp:0, items:{}, records:0, harvests:0 };
+  const addXp = (skill, amount)=>{
+    const g = Math.round(amount * eff);
+    if (g > 0){ gainXp(skill, g); summary.xp += g; }
+  };
+  const a = Game.activity;
+  if (a && a.kind === 'gather'){
+    const it = Items[a.itemId];
+    if (it && it.node === Game.node && levelOf(it.skill) >= it.lvl){
+      const times = Math.floor(seconds / gatherInterval(it.skill));
+      addXp(it.skill, it.xp * times);
+      const q = Math.floor(times * 1.4 * eff);
+      if (q > 0){ giveItem(a.itemId, q, false); summary.items[a.itemId] = q; }
+      const recs = Math.floor(times * eff * 1.2);
+      for (let i=0;i<recs;i++) recordObject(a.itemId, 1);
+      summary.records += recs;
+    }
+  } else if (a && a.kind === 'craft'){
+    const times = Math.floor(seconds / 2.0);
+    let t = 0;
+    while (t < times && canAfford(a.recipe.cost)){ payCost(a.recipe.cost); t++; }
+    if (t > 0){
+      giveItem(a.recipe.out, a.recipe.qty*t, false);
+      addXp(mapRecipeSkill(a.recipe.type), a.recipe.xp * t);
+      summary.items[a.recipe.out] = a.recipe.qty*t;
+    }
+  } else if (a && a.kind === 'observe'){
+    const times = Math.floor(seconds / TUNING.OBSERVE_SEC);
+    for (let i=0;i<times;i++) doObserve(a.siteId);
+  } else if (a && a.kind === 'audience'){
+    const times = Math.floor(seconds / TUNING.OBSERVE_SEC);
+    for (let i=0;i<times;i++) doAudience(a.nodeId);
+  } else if (a && a.kind === 'grow'){
+    const site = GROW_SITES[a.siteId];
+    if (site){
+      const times = Math.floor(seconds / site.sec);
+      for (let i=0;i<times && (growState(a.siteId).stage||0) < site.stages;i++) doGrow(a.siteId);
+    }
+  }
+  // 田地照常生长
+  const beforeH = Game.stats.harvests;
+  farmCatchUp(seconds * farmSpeedMult());
+  summary.harvests = Game.stats.harvests - beforeH;
+  // 御使经验
+  gainXp('yushi', 0.5 * Object.keys(Game.deployed).length * seconds * 0.5);
+  saveGame();
+  return summary;
 }
+window.settleAway = settleAway;
 
-// 导出到 window
 if (typeof window !== 'undefined'){
   window.totalOf = totalOf; window.giveItem = giveItem; window.takeItem = takeItem;
   window.canAfford = canAfford; window.payCost = payCost; window.gainXp = gainXp;
-  window.levelOf = levelOf; window.startCombat = startCombat; window.stopActivity = stopActivity;
+  window.levelOf = levelOf; window.stopActivity = stopActivity;
   window.processRecipe = processRecipe; window.gameLoop = gameLoop;
-  window.resetToDefault = resetToDefault; window.saveGame = saveGame;
-  window.farmCatchUp = farmCatchUp;
-  window.pushRecentLoot = pushRecentLoot;
-  window.actionOutputId = actionOutputId;
-  window.log = log;
+  window.farmCatchUp = farmCatchUp; window.actionOutputId = actionOutputId;
+  window.playerMaxHp = playerMaxHp; window.combatTick = combatTick;
+  window.playerElement = playerElement; window.playerDamageRange = playerDamageRange;
+  window.playerAttackInterval = playerAttackInterval; window.totalDefence = totalDefence;
+  window.playerEvasion = playerEvasion; window.monsterInterval = monsterInterval;
 }
+function stopActivity(){ Game.activity = null; }
