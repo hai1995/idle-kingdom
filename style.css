@@ -332,12 +332,39 @@ button,.tab,.chip-btn,.icon-btn,.btn-mini{ -webkit-tap-highlight-color:transpare
 .qi-name{ flex:1; }
 .qi-prog{ font-size:11px; color:var(--azurite-d); }
 .qi-eta{ font-size:11px; color:var(--ink-60); margin-left:4px; }
+/* 行动页离线概览 */
+.offline-line{ font-size:12px; padding:6px 8px; margin-top:8px; color:var(--ink-2); background:rgba(140,90,60,.07); border:1px solid var(--line); border-radius:6px; }
+.offline-line b{ color:var(--azurite); }
+/* 节点著录进度 */
+.node-prog{ font-size:12px; padding:4px 8px; margin:6px 0 2px; color:var(--ink-2); background:rgba(74,124,89,.1); border:1px solid var(--line); border-radius:6px; }
+.node-prog b{ color:var(--jade); }
+/* 顶栏征兆计数（可点击查看总效应） */
+#omenCount{ cursor:pointer; }
+#omenCount:hover{ text-decoration:underline; }
+/* 节点列表项著录进度小标 */
+.np{ margin-left:auto; font-size:11px; color:var(--ink-60); padding:0 4px; }
+.np.done{ color:var(--jade); }
 /* 五行克制提示 */
 .wuxing-tip{ font-size:12px; padding:4px 8px; margin:6px 0; border-radius:6px; background:rgba(140,90,60,.08); }
 .wuxing-tip.good{ color:var(--jade); background:rgba(74,124,89,.12); }
 .wuxing-tip.bad{ color:var(--cinnabar); background:rgba(195,39,43,.1); }
 .wuxing-tip .wux-btn{ margin-left:8px; padding:2px 8px; font-size:11px; }
 .beast-card .el-btn{ margin-left:2px; padding:1px 7px; font-size:11px; vertical-align:middle; }
+.beast-card .drop-line{ color:var(--ink-60); font-size:11px; }
+.skill-card .skill-go{ margin-top:6px; padding:2px 9px; font-size:11px; }
+.skill-card .mat-src{ margin-top:6px; font-size:11px; color:var(--ink-60); display:flex; flex-wrap:wrap; gap:4px; align-items:center; }
+.skill-card .mat-src .skill-go{ margin-top:0; }
+.skill-card .mat-inv{ margin-top:4px; font-size:11px; color:var(--ink-60); display:flex; flex-wrap:wrap; gap:6px; }
+.skill-card .mat-inv .ok{ color:var(--jade); }
+.skill-card .mat-inv .gap{ color:#c0392b; }
+/* 节点异兽著录状态 */
+.rec-ok{ color:var(--jade); font-size:11px; margin-left:3px; }
+.rec-no{ color:var(--ink-60); font-size:11px; margin-left:3px; }
+/* 图鉴详情前往节点按钮 */
+.modal-btns .skill-go{ margin-top:0; }
+/* 图鉴分类完成度进度条 */
+.codex-bar{ height:4px; background:var(--line); border-radius:3px; margin:6px 2px 2px; overflow:hidden; }
+.codex-bar .fill{ height:100%; background:var(--jade); transition:width .2s; }
 /* 战斗预估 */
 .combat-est{ font-size:12px; padding:4px 8px; margin:6px 0; border-radius:6px; background:rgba(140,90,60,.08); }
 .combat-est.good{ color:var(--jade); background:rgba(74,124,89,.12); }

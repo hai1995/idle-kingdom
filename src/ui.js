@@ -184,6 +184,8 @@ const UI = {
     if (ms) ms.textContent = fmt(Math.max(0, c.monsterHp)) + ' / ' + fmt(m.hp);
     const cs = $('combatStats');
     if (cs) cs.textContent = `回合 ${c.round||0} · 造成 ${c.dmgOut||0} · 承伤 ${c.dmgIn||0}${Game.stats.winStreak>1?` · 连胜 ${Game.stats.winStreak}`:''}`;
+    const est = $('combatEst');
+    if (est){ const r = combatEstimateInner(m, c, c.monsterHp); if (r){ est.className = 'combat-est ' + r.cls; est.innerHTML = r.html; } }
   },
   // 全局「下一步建议」：除舆地页（自带条）外，其余页签顶栏常驻显示
   updateGuidance(){
@@ -338,7 +340,9 @@ const UI = {
       return best ? `${best} ${lv}` : '—';
     })());
     set('recordCount', `${recordedCount()} / ${Object.keys(CODEX).length}`);
-    set('omenCount', String(Game.omens.length));
+    set('omenCount', Game.omens.length ? `⚡${Game.omens.length}` : '0');
+    const oce = $('omenCount');
+    if (oce) oce.title = Game.omens.length ? '点击查看征兆总效应' : '当前无征兆';
     const hp = $('hpDisplay');
     if (hp){
       if (Game.combat){
@@ -474,6 +478,13 @@ function xpBar(skillId){
 }
 
 // ================= 舆地 =================
+// 节点著录进度：统计该节点可著录的物产/异兽中已著录数量
+function nodeRecordProgress(nodeId){
+  let total = 0, done = 0;
+  for (const it of Object.values(Items)) if (it.node === nodeId){ total++; if ((Game.records[it.id]||{}).count > 0) done++; }
+  for (const m of Object.values(Monsters)) if (m.nodeId === nodeId){ total++; if ((Game.records[m.id]||{}).count > 0) done++; }
+  return { done, total };
+}
 // 持续指引：根据当前进度给出最贴心的下一步建议
 function nextHint(){
   const recCount = Object.keys(Game.records).length;
@@ -564,6 +575,7 @@ UI.renderYudi = function(){
           ${reason==='tame'?'<span class="rec-tag tame" title="可御使的异兽在此">御</span>':''}
           ${reason==='explore'?'<span class="rec-tag" title="尚未涉足，可前往探索">荐</span>':''}
           ${cur?'<span class="here-tag">在</span>':''}
+          ${(function(){ const p = nodeRecordProgress(n.id); return p.total>0?`<span class="np ${p.done===p.total?'done':''}" title="已著录 ${p.done}/${p.total} 种">录 ${p.done}/${p.total}</span>`:''; })()}
         </div>`;
       }).join('')}
       </div>
@@ -575,6 +587,7 @@ UI.renderYudi = function(){
       <div class="meta">${esc(sel.chapter||'')} · 需舆地 ${sel.unlockLevel}${sel.hazard?` · <span class="haz-text">${esc(sel.hazard.detail||sel.hazard.type)}</span>`:''}</div>
       ${!un?`<div class="lock-note">🔒 ${esc(nodeLockReason(sel))}</div>`:''}
       ${sel.terrain?`<div class="terrain">${esc(sel.terrain)}</div>`:''}
+      ${(function(){ const rp = nodeRecordProgress(sel.id); return rp.total>0?`<div class="node-prog">已著录 <b>${rp.done}</b>/${rp.total} 种${rp.done===rp.total?' · 此山录毕 ✦':''}</div>`:''; })()}
       <div class="yields">
         ${Object.entries(sel.yields||{}).map(([k,v])=>{
           if (k === 'unknown' || k === 'special') return '';
@@ -593,7 +606,9 @@ UI.renderYudi = function(){
         ${(sel.fauna||[]).map(f=>{
           const meta = Object.values(Monsters).find(m=>m.name===f.name);
           const el = meta ? elBadge(meta.el) : '';
-          return `<div class="fauna-chip">${CAT_EMOJI[f.category]||'🐾'}${nameTag(f.name, meta?meta.py:'')}${el}${f.effect?`<i>${esc(f.effect)}</i>`:''}</div>`;
+          const rec = meta ? (Game.records[meta.id]||{count:0}) : null;
+          const recTag = rec ? (rec.count>0?`<span class="rec-ok">✓录${rec.count}</span>`:`<span class="rec-no">未录</span>`) : '';
+          return `<div class="fauna-chip">${CAT_EMOJI[f.category]||'🐾'}${nameTag(f.name, meta?meta.py:'')}${el}${recTag}${f.effect?`<i>${esc(f.effect)}</i>`:''}</div>`;
         }).join('') || '<span class="hint">此地无异兽记载</span>'}
       </div>
       <div class="actions">
@@ -668,6 +683,77 @@ function nodeMythBlock(node){
   if (!node.myth) return '';
   return `<div class="myth-block"><b>神话</b>${esc(node.myth.figure?node.myth.figure+'：':'')}${esc(node.myth.content||'')}</div>`;
 }
+// 采集技能 → 产出节点（用于技能页一键前往）
+function nodeForSkill(skillId){
+  const pool = (typeof GATHER_POOLS!=='undefined' && GATHER_POOLS[skillId]) || [];
+  for (const iid of pool){
+    const it = Items[iid];
+    if (it && it.node){
+      for (const r of (WORLD.regions||[])){
+        const n = (r.nodes||[]).find(nn=>nn.id===it.node);
+        if (n) return { nodeId:n.id, regionId:r.regionId };
+      }
+    }
+  }
+  return null;
+}
+// 制作技能 → 所需材料来源节点（取首个有产地的材料）
+function materialNodeForSkill(skillId){
+  const recipes = (typeof Recipes!=='undefined' && Recipes || []).filter(r=>(typeof RECIPE_SKILL!=='undefined' && RECIPE_SKILL[r.type])===skillId);
+  for (const r of recipes){
+    for (const c of (r.cost||[])){
+      const it = Items[c[0]];
+      if (it && it.node){
+        for (const reg of (WORLD.regions||[])){
+          const n = (reg.nodes||[]).find(nn=>nn.id===it.node);
+          if (n) return { nodeId:n.id, regionId:reg.regionId, itemName:it.name };
+        }
+      }
+    }
+  }
+  return null;
+}
+// 制作技能 → 所有材料来源节点（去重，按节点）
+function materialNodesForSkill(skillId){
+  const out = [];
+  const seen = {};
+  const recipes = (typeof Recipes!=='undefined' && Recipes || []).filter(r=>(typeof RECIPE_SKILL!=='undefined' && RECIPE_SKILL[r.type])===skillId);
+  for (const r of recipes){
+    for (const c of (r.cost||[])){
+      const it = Items[c[0]];
+      if (it && it.node && !seen[it.node]){
+        for (const reg of (WORLD.regions||[])){
+          const n = (reg.nodes||[]).find(nn=>nn.id===it.node);
+          if (n){ seen[it.node] = true; out.push({ nodeId:n.id, regionId:reg.regionId, itemName:it.name, nodeName:n.name }); break; }
+        }
+      }
+    }
+  }
+  return out;
+}
+// 制作技能 → 各材料「已持有 / 需求」状态（按最大需求量计）
+function materialStatusForSkill(skillId){
+  const map = {};
+  const recipes = (typeof Recipes!=='undefined' && Recipes || []).filter(r=>(typeof RECIPE_SKILL!=='undefined' && RECIPE_SKILL[r.type])===skillId);
+  for (const r of recipes) for (const c of (r.cost||[])){
+    const need = c[1]||1;
+    if (!map[c[0]] || need > map[c[0]].need) map[c[0]] = { id:c[0], name:(Items[c[0]]||{}).name||c[0], need };
+  }
+  return Object.values(map).map(m=>{ const have = (Game.inv && Game.inv[m.id])||0; return { ...m, have, ok: have>=m.need }; });
+}
+// 图鉴条目 → 其产出/讨伐节点
+function codexNode(e){
+  if (!e) return null;
+  let nodeId = null;
+  if (e.cat === '异兽'){ const m = Monsters[e.id]; if (m) nodeId = m.nodeId; }
+  else { const it = Items[e.id]; if (it) nodeId = it.node; }
+  if (!nodeId) return null;
+  for (const r of (WORLD.regions||[])){
+    const n = (r.nodes||[]).find(nn=>nn.id===nodeId);
+    if (n) return { nodeId:n.id, regionId:r.regionId };
+  }
+  return null;
+}
 // ================= 技能 =================
 UI.renderSkills = function(){
   const box = $('content');
@@ -691,13 +777,21 @@ UI.renderSkills = function(){
     ${Object.entries(groups).map(([k,v])=>`<button class="chip-btn ${filter===k?'on':''}" onclick="UI.skillFilter='${k}';UI.renderSkills()">${v}</button>`).join('')}
   </div>
   <div class="skill-grid">
-    ${ids.map(id=>{
+    ${    ids.map(id=>{
       const sk = Skills[id];
       const active = cur && ((cur.kind==='gather' && cur.skill===id) || (cur.kind==='craft' && mapRecipeSkill(cur.recipe.type)===id));
+      const nf = nodeForSkill(id);
+      const mns = nf ? null : materialNodesForSkill(id);
+      const mst = nf ? null : materialStatusForSkill(id);
+      const matBtns = (mns && mns.length) ? `<div class="mat-src">材料来源：${mns.slice(0,3).map(m=>`<button class="btn-mini skill-go" onclick="UI.selRegion='${m.regionId}';UI.selNode='${m.nodeId}';UI.switchTab('yudi')">📍 ${esc(m.nodeName||'')}</button>`).join('')}${mns.length>3?`<span class="hint">等 ${mns.length} 处</span>`:''}</div>` : '';
+      const matInv = (mst && mst.length) ? `<div class="mat-inv">${mst.map(m=>`<span class="${m.ok?'ok':'gap'}">${esc(m.name)} ${m.have}/${m.need}${m.ok?'✓':'✗'}</span>`).join(' · ')}</div>` : '';
       return `<div class="skill-card ${active?'active':''}" data-skill="${id}">
         <div class="sc-head"><span class="sc-icon">${sk.icon}</span><b>${esc(sk.name)}</b>${skillLevelTag(id)}</div>
         <div class="sc-desc">${esc(sk.desc)}</div>
         ${xpBar(id)}
+        ${nf?`<button class="btn-mini skill-go" onclick="UI.selRegion='${nf.regionId}';UI.selNode='${nf.nodeId}';UI.switchTab('yudi')">📍 前往产出地</button>`:''}
+        ${matBtns}
+        ${matInv}
       </div>`;
     }).join('')}
   </div>
@@ -767,15 +861,45 @@ function wuxingAdvice(pe, me){
   const btn = (counter && rel !== '克制') ? `<button class="btn-mini wux-btn" onclick="setCombatStyle('zhu');setZhuEl('${counter}');UI.renderTaofa()">⚡切克「${counter}」属</button>` : '';
   return `<div class="wuxing-tip ${cls}">五行：${pe}属 ${arrow} ${rel} ${me}属 ${tip}${btn}</div>`;
 }
-// 战斗预估：预计击杀耗时、双方 DPS、能否撑住
-function combatEstimateHtml(m, c){
-  if (!m) return '';
+// 战斗预估：预计击杀耗时、双方 DPS、能否撑住（hpNow 传入则为实时剩余血量）
+function combatEstimateInner(m, c, hpNow){
+  if (!m) return null;
   const dps = playerDpsEstimate();
-  if (!dps) return '';
-  const kill = Math.max(1, m.hp) / dps;
+  if (!dps) return null;
+  const hp = (hpNow==null ? m.hp : hpNow);
+  const kill = Math.max(1, hp) / dps;
   const mdps = Math.max(1, m.atk - totalDefence()*0.3) * 0.6 / Math.max(1, monsterInterval(m, c));
   const survive = kill * mdps <= playerMaxHp();
-  return `<div class="combat-est ${survive?'good':'bad'}">预计击杀 ≈ ${fmtTime(Math.ceil(kill))} · 你 DPS≈${dps.toFixed(1)} · 敌 DPS≈${mdps.toFixed(1)}${survive?'':' · ⚠ 可能撑不住'}</div>`;
+  return { cls: survive ? 'good' : 'bad',
+    html: `预计击杀 ≈ ${fmtTime(Math.ceil(kill))} · 你 DPS≈${dps.toFixed(1)} · 敌 DPS≈${mdps.toFixed(1)}${survive?'':' · ⚠ 可能撑不住'}` };
+}
+function combatEstimateHtml(m, c, hpNow){
+  const r = combatEstimateInner(m, c, hpNow);
+  return r ? `<div class="combat-est ${r.cls}" id="combatEst">${r.html}</div>` : '';
+}
+// 离线收益预估（纯读取，不改动任何状态）：仅依据当前活动/御使按真实公式估算
+function estimateOfflineGains(hours){
+  const cap = offlineCapHours();
+  const sec = Math.max(0, Math.min(hours==null ? cap : hours, cap)) * 3600;
+  if (sec < 1) return null;
+  const eff = offlineEff();
+  const a = Game.activity;
+  let xp = 0; const items = {};
+  if (a && a.kind === 'gather'){
+    const it = Items[a.itemId];
+    if (it && it.node === Game.node && levelOf(it.skill) >= it.lvl){
+      const times = Math.floor(sec / 1);               // 采集基础间隔 ≈1s
+      xp += Math.round(it.xp * times * eff);
+      const q = Math.floor(times * 1.4 * eff);
+      if (q > 0) items[a.itemId] = q;
+    }
+  } else if (a && a.kind === 'craft'){
+    const times = Math.floor(sec / 2);                 // 制作基础间隔 ≈2s
+    let t = 0; while (t < times && canAfford(a.recipe.cost)) t++;
+    if (t > 0){ items[a.recipe.out] = (a.recipe.qty||1) * t; xp += Math.round((a.recipe.xp||0) * t * eff); }
+  }
+  xp += Math.round(0.5 * Object.keys(Game.deployed).length * sec * 0.5 * eff);
+  return { seconds:sec, xp, items };
 }
 
 // ================= 征伐 =================
@@ -845,11 +969,13 @@ UI.renderTaofa = function(){
       const th = threatOf(x);
       const rec = Game.records[x.id]||{count:0,tier:0};
       const counterEl = (x.el && TUNING.KE_MAP[x.el]) ? TUNING.KE_MAP[x.el] : '';
+      const drops = (x.loot||[]).map(([iid])=> (Items[iid]||{}).name || iid).slice(0,3).join('、');
       return `<div class="beast-card ${th.level}">
         <div class="bc-head"><b>${esc(x.name)}</b>${nameTag(x.name, x.py?x.py:'')}${elBadge(x.el)}
           <span class="th ${th.level}">${th.label}</span></div>
         <div class="bc-sub">气血 ${fmt(x.hp)} · 攻 ${fmt(x.atk)} · 防 ${fmt(x.def)} · 经验 ${fmt(x.xp)}${counterEl?` · <button class="btn-mini el-btn" title="一键切到克制属性（下一场生效）" onclick="setCombatStyle('zhu');setZhuEl('${counterEl}');UI.renderTaofa()">宜用${counterEl}属 ⚡</button>`:''}</div>
         <div class="bc-sub">${esc(x.form||'')}</div>
+        <div class="bc-sub drop-line">📍 ${esc(node?node.name:'')}${drops?` · 掉落 ${esc(drops)}`:''}</div>
         <div class="bc-foot">
           <span class="rec">著录 ${rec.count}</span>
           <button class="btn small ${un&&lvOk?'primary':''}" ${un&&lvOk?'':'disabled'}
@@ -967,10 +1093,14 @@ UI.renderCodex = function(){
   });
   const total = Object.keys(CODEX).length;
   const done = recordedCount();
+  const tabTotal = entries.length;
+  const tabDone = entries.filter(e=>(Game.records[e.id]||{}).count>0).length;
+  const tabPct = tabTotal ? Math.round(tabDone/tabTotal*100) : 0;
   let html = `<div class="filter-row">
     ${Object.entries(tabs).map(([k,v])=>`<button class="chip-btn ${this.codexTab===k?'on':''}" onclick="UI.codexTab='${k}';UI.renderCodex()">${v}</button>`).join('')}
-    <span class="hint">总录 ${done}/${total}</span>
+    <span class="hint">本类 ${tabDone}/${tabTotal} · 总录 ${done}/${total}</span>
   </div>
+  <div class="codex-bar" title="本类已著录 ${tabPct}%"><div class="fill" style="width:${tabPct}%"></div></div>
   <div class="codex-grid">
     ${entries.map(e=>{
       const rec = Game.records[e.id]||{count:0,tier:0};
@@ -991,11 +1121,14 @@ function showCodexDetail(id){
     const locked = i > rec.tier;
     return `<div class="reveal ${locked?'locked':''}"><b>${TUNING.MASTERY.NAMES[i]}</b>${locked?'<span class="lock-tag">未揭示</span>':esc(txt||'（无）')}</div>`;
   }).join('');
+  const cn = codexNode(e);
+  const cnLabel = e.cat === '异兽' ? '前往讨伐节点' : '前往产出节点';
+  const cnBtn = cn ? `<button class="btn on" onclick="UI.selRegion='${cn.regionId}';UI.selNode='${cn.nodeId}';UI.switchTab('yudi');UI.closeModal()">📍 ${cnLabel}</button>` : '';
   UI.modal(`<h3>${esc(e.name)} <span class="tier">${e.cat}</span></h3>
     <div class="meta">著录 ${rec.count} 次 · ${rec.count>0?TUNING.MASTERY.NAMES[rec.tier]:'未见'}</div>
     ${rows}
     ${e.source?`<div class="source">${esc(e.source)}</div>`:''}
-    <div class="modal-btns"><button class="btn" onclick="UI.closeModal()">闭</button></div>`);
+    <div class="modal-btns">${cnBtn}<button class="btn" onclick="UI.closeModal()">闭</button></div>`);
 }
 window.showCodexDetail = showCodexDetail;
 
@@ -1068,8 +1201,39 @@ function omenEffectText(def){
   return parts.join('；');
 }
 window.omenEffectText = omenEffectText;
+// 征兆总效应弹窗：汇总所有生效征兆的具体方向与范围（顶栏 ⚡ 计数可点击）
+function openOmenSummary(){
+  const omens = Game.omens || [];
+  let body;
+  if (!omens.length){
+    body = '<div class="hint">当前无生效征兆。首次著录异兽可能触发吉凶之兆（如「其邑大水」「有大兵」）。</div>';
+  } else {
+    const agg = (typeof currentOmenEffects==='function') ? currentOmenEffects() : [];
+    body = `<div class="omen-summary">总效应：${agg.length?agg.map(e=>`${e.label} ${e.pct>0?'+':''}${e.pct}%`).join(' · '):'—'}</div>`
+      + '<div class="omen-grid">'
+      + omens.map(o=>{
+          const d = OMENS[o.id]; if (!d) return '';
+          const left = o.until ? fmtTime(o.until - gameTime()) : '常驻';
+          const mark = d.polarity==='凶'?'凶':d.polarity==='吉'?'吉':'中';
+          return `<div class="omen-card ${d.polarity}">
+            <div class="oc-head"><b>${esc(d.beast||d.type)}</b><span class="pol ${d.polarity}">${mark}</span><span class="left">余 ${left}</span></div>
+            <div class="oc-desc">${esc(d.desc||'')}</div>
+            <div class="oc-effect">${omenEffectText(d)}</div></div>`;
+        }).join('')
+      + '</div>';
+  }
+  UI.modal(`<h3>⚡ 征兆总效应</h3>${body}<div class="modal-btns"><button class="btn" onclick="UI.closeModal()">闭</button></div>`);
+}
+window.openOmenSummary = openOmenSummary;
 window.wuxingAdvice = wuxingAdvice;
 window.combatEstimateHtml = combatEstimateHtml;
+window.estimateOfflineGains = estimateOfflineGains;
+window.nodeForSkill = nodeForSkill;
+window.materialNodeForSkill = materialNodeForSkill;
+window.materialNodesForSkill = materialNodesForSkill;
+window.materialStatusForSkill = materialStatusForSkill;
+window.codexNode = codexNode;
+window.nodeRecordProgress = nodeRecordProgress;
 // 当前所有生效征兆的聚合数值预览（供「当前总效应」展示）
 function currentOmenEffects(){
   const keys = [['yield','全局产出'],['gather','采集效率'],['offline','离线收益'],['trade','商旅收益'],
@@ -1247,6 +1411,7 @@ UI.renderQueue = function(){
         </div>
         ${fb&&fb.kind!=='idle'?`<div class="hint">当前兜底：${esc(entryLabel({kind:fb.kind,target:fb.target}))} ×${fb.qty}</div>`:''}
       </div>
+      <div class="offline-line">🌙 离线：上限 <b>${offlineCapHours()}h</b> · 效率 <b>×${offlineEff().toFixed(2)}</b>${Game.queue.length?` · 当前队列将计入离线结算`:''}${(function(){ const p = estimateOfflineGains(); if (!p || p.xp<=0) return ''; const ks = Object.keys(p.items); const it = ks.length?`、+${fmt(p.items[ks[0]])} ${esc((Items[ks[0]]||{}).name||ks[0])}`:''; return ` · 挂满约 +${fmt(p.xp)} 经验${it}`; })()}</div>
     </div>
     <div class="panel queue-add">
       <h3>添加任务</h3>
@@ -1516,6 +1681,7 @@ function init(){
     else window.addEventListener('resize', syncStatusBarSpace);
   }
   $('btnSettings') && $('btnSettings').addEventListener('click', openSettings);
+  $('omenCount') && $('omenCount').addEventListener('click', openOmenSummary);
   $('btnHelp') && $('btnHelp').addEventListener('click', openHelp);
   $('btnSave') && $('btnSave').addEventListener('click', ()=>{ saveGame(); UI.toast('已存档'); });
   $('btnStop') && $('btnStop').addEventListener('click', ()=>{ stopActivity(); if (typeof pauseQueue==='function') pauseQueue('手动停止'); UI.refreshActivity(); });

@@ -94,7 +94,7 @@ function estimateQueueSeconds(){
     const def = entryDef(e);
     if (!def) continue;
     const ak = def.mode==='recipe' ? 'craft' : (e.kind==='taofa' ? 'taofa' : 'gather');
-    s += e.qty * (typeof activityDuration==='function' ? activityDuration({ kind:ak, siteId:e.siteId }) : 1);
+    s += e.qty * (ak==='craft' ? 2 : 1);   // 制作≈2s/次，采集/讨伐≈1s/次（约估，不含转场）
   }
   return s;
 }
@@ -103,7 +103,7 @@ function estimateEntrySeconds(e){
   const def = entryDef(e);
   if (!def) return 0;
   const ak = def.mode==='recipe' ? 'craft' : (e.kind==='taofa' ? 'taofa' : 'gather');
-  return e.qty * (typeof activityDuration==='function' ? activityDuration({ kind:ak, siteId:e.siteId }) : 1);
+  return e.qty * (ak==='craft' ? 2 : 1);
 }
 
 // ---------- 可执行性 ----------

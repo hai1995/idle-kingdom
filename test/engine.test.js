@@ -694,6 +694,105 @@ try {
 } catch(e){ etaOk = false; console.error('队列ETA异常：'+e.stack); }
 assert(etaOk && etaTxt.indexOf('预计一轮') >= 0, '队列显示预计一轮耗时');
 assert(etaTxt.indexOf('约') >= 0, '队列条目显示单条预计耗时');
+assert(etaTxt.indexOf('离线') >= 0 && etaTxt.indexOf('效率') >= 0, '行动页显示离线上限与效率');
+
+// ============ 16.14 离线收益预估（纯读取） ============
+section('离线收益预估');
+const _act = ST.Game.activity, _node = ST.Game.node;
+let offOk2 = true, offTxt = '', preview = null;
+try {
+  const someItem = Object.values(ST.Items).find(it=>it.node && it.skill);
+  ST.Game.activity = { kind:'gather', itemId: someItem.id };
+  ST.Game.node = someItem.node;
+  preview = ST.estimateOfflineGains();
+  ST.UI.currentTab = 'queue'; ST.UI.renderQueue();
+  offTxt = renderTargets.content.innerHTML;
+} catch(e){ offOk2 = false; console.error('离线预估异常：'+e.stack); }
+assert(offOk2 && preview && preview.xp > 0, '离线收益预估返回正值经验');
+assert(offTxt.indexOf('挂满约') >= 0 && offTxt.indexOf('经验') >= 0, '行动页显示离线收益预估');
+ST.Game.activity = _act; ST.Game.node = _node;
+
+// ============ 16.15 技能页前往产出地 ============
+section('技能页前往产出地');
+let sgOk = true, sgTxt = '', nf = null;
+try {
+  nf = ST.nodeForSkill('qiaocai');
+  ST.UI.currentTab = 'skills'; ST.UI.renderSkills();
+  sgTxt = renderTargets.content.innerHTML;
+} catch(e){ sgOk = false; console.error('技能页跳转异常：'+e.stack); }
+assert(sgOk && nf && nf.nodeId, 'nodeForSkill 返回采集节点');
+assert(sgTxt.indexOf('前往产出地') >= 0 && sgTxt.indexOf('switchTab') >= 0, '技能卡显示前往产出地按钮');
+
+// ============ 16.16 图鉴分类完成度 ============
+section('图鉴分类完成度');
+let cxOk = true, cxTxt = '';
+try { ST.UI.currentTab = 'codex'; ST.UI.codexTab = 'beast'; ST.UI.renderCodex(); cxTxt = renderTargets.content.innerHTML; }
+catch(e){ cxOk = false; console.error('图鉴渲染异常：'+e.stack); }
+assert(cxOk, 'renderCodex 不抛错');
+assert(cxTxt.indexOf('本类') >= 0 && cxTxt.indexOf('总录') >= 0, '图鉴显示本类与总录完成度');
+assert(cxTxt.indexOf('codex-bar') >= 0, '图鉴渲染分类进度条');
+
+// ============ 16.19 节点著录进度 ============
+section('节点著录进度');
+let nrOk = true, nrTxt = '', rp = null;
+try {
+  const nid = (ST.WORLD.regions[0].nodes[0] || {}).id;
+  rp = (typeof ST.nodeRecordProgress==='function') ? ST.nodeRecordProgress(nid) : null;
+  ST.UI.currentTab = 'yudi'; ST.UI.selNode = nid; ST.UI.renderYudi();
+  nrTxt = renderTargets.content.innerHTML;
+} catch(e){ nrOk = false; console.error('节点进度异常：'+e.stack); }
+assert(nrOk && rp && rp.total > 0, 'nodeRecordProgress 返回该节点可著录总数');
+assert(nrTxt.indexOf('已著录') >= 0, '节点详情显示已著录进度');
+assert(nrTxt.indexOf('录 ') >= 0, '节点列表项显示著录进度小标');
+assert(nrTxt.indexOf('rec-ok') >= 0 || nrTxt.indexOf('rec-no') >= 0, '节点详情异兽显示著录状态');
+
+// ============ 16.20 顶栏征兆总效应弹窗 ============
+section('征兆总效应弹窗');
+let omOk2 = true, omModal = '', omBar = '';
+const _omens = ST.Game.omens;
+try {
+  ST.Game.omens = [{ id:'lili' }];
+  ST.UI.renderTopbar();
+  omBar = renderTargets.omenCount.textContent;
+  ST.openOmenSummary();
+  omModal = renderTargets.modalBox.innerHTML;
+} catch(e){ omOk2 = false; console.error('征兆弹窗异常：'+e.stack); }
+finally { ST.Game.omens = _omens; }
+assert(omOk2, 'openOmenSummary 不抛错');
+assert(omBar.indexOf('⚡') >= 0, '顶栏征兆计数带 ⚡ 图标');
+assert(omModal.indexOf('征兆总效应') >= 0 && omModal.indexOf('总效应') >= 0, '征兆弹窗汇总总效应');
+
+// ============ 16.17 制作技能材料来源跳转 ============
+section('制作技能材料来源');
+let msOk = true, msTxt = '', mn = null;
+try {
+  // 找一个有配方的制作技能（如 burn），并确认其材料有节点
+  const craftSkill = Object.keys(ST.RECIPE_SKILL).length ? (function(){
+    const inv = {}; ST.Recipes.forEach(r=>{ inv[ST.RECIPE_SKILL[r.type]] = true; });
+    return Object.keys(inv)[0];
+  })() : null;
+  mn = craftSkill ? ST.materialNodeForSkill(craftSkill) : null;
+  ST.UI.currentTab = 'skills'; ST.UI.skillFilter = 'all'; ST.UI.renderSkills();
+  msTxt = renderTargets.content.innerHTML;
+} catch(e){ msOk = false; console.error('材料来源异常：'+e.stack); }
+assert(msOk, 'renderSkills 不抛错');
+assert(msTxt.indexOf('材料') >= 0 && msTxt.indexOf('来源') >= 0, '制作技能卡显示材料来源');
+assert(msTxt.indexOf('mat-src') >= 0, '制作技能卡以多来源行渲染材料地点');
+assert(msTxt.indexOf('mat-inv') >= 0 && (msTxt.indexOf('/') >= 0), '制作技能卡显示材料持有/缺口');
+
+// ============ 16.18 图鉴详情前往节点 ============
+section('图鉴详情前往节点');
+let cdOk = true, cdBtn = 0;
+try {
+  // 取一个 beast 类 codex 条目，验证可定位节点
+  const beastEntry = Object.values(ST.CODEX).find(e=>e.cat==='异兽' && ST.codexNode(e));
+  if (beastEntry){
+    const cn = ST.codexNode(beastEntry);
+    ST.showCodexDetail(beastEntry.id);
+    cdBtn = (renderTargets.modalBox.innerHTML.indexOf('前往讨伐节点') >= 0) ? 1 : 0;
+  }
+} catch(e){ cdOk = false; console.error('图鉴详情异常：'+e.stack); }
+assert(cdOk && cdBtn === 1, '图鉴异兽详情显示前往讨伐节点按钮');
 ST.Game.queue = _q2;
 
 // ============ 16.11 五行克制提示 ============
@@ -720,6 +819,7 @@ try { ceTxt = ST.combatEstimateHtml({ hp:100, atk:10 }, null); }
 catch(e){ ceOk = false; console.error('战斗预估异常：'+e.stack); }
 assert(ceOk, 'combatEstimateHtml 不抛错');
 assert(ceTxt.indexOf('预计击杀') >= 0 && ceTxt.indexOf('DPS') >= 0, '战斗显示预计击杀与双方 DPS');
+assert(ceTxt.indexOf('combatEst') >= 0, '战斗预估含可实时刷新元素');
 
 // ============ 16.13 讨伐目标卡宜用属性按钮 ============
 section('讨伐目标卡宜用属性');
@@ -727,6 +827,7 @@ let ebOk = true, ebTxt = '';
 try { ST.UI.currentTab = 'taofa'; ST.UI.renderTaofa(); ebTxt = renderTargets.content.innerHTML; }
 catch(e){ ebOk = false; console.error('目标卡异常：'+e.stack); }
 assert(ebOk && ebTxt.indexOf('宜用') >= 0 && ebTxt.indexOf('setZhuEl') >= 0, '讨伐目标卡宜用属性可一键切换');
+assert(ebTxt.indexOf('掉落') >= 0 && ebTxt.indexOf('📍') >= 0, '讨伐目标卡显示掉落与所在山');
 
 // ============ 16.7 御使引导 · 连胜 ============
 section('御使引导 · 连胜');
