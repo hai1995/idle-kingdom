@@ -87,6 +87,24 @@ function entryUnit(e){
 function entryProgressText(e){
   return `${e.done||0}/${e.qty} ${entryUnit(e)}`;
 }
+// 队列一轮预估耗时（秒）：各条目数量 × 基础间隔（不含转场，作约估）
+function estimateQueueSeconds(){
+  let s = 0;
+  for (const e of Game.queue){
+    const def = entryDef(e);
+    if (!def) continue;
+    const ak = def.mode==='recipe' ? 'craft' : (e.kind==='taofa' ? 'taofa' : 'gather');
+    s += e.qty * (typeof activityDuration==='function' ? activityDuration({ kind:ak, siteId:e.siteId }) : 1);
+  }
+  return s;
+}
+// 单条目预估耗时（秒）
+function estimateEntrySeconds(e){
+  const def = entryDef(e);
+  if (!def) return 0;
+  const ak = def.mode==='recipe' ? 'craft' : (e.kind==='taofa' ? 'taofa' : 'gather');
+  return e.qty * (typeof activityDuration==='function' ? activityDuration({ kind:ak, siteId:e.siteId }) : 1);
+}
 
 // ---------- 可执行性 ----------
 function entryCanRun(e){
@@ -256,6 +274,32 @@ function setFallback(kind, target, qty){
   saveGame();
   return Game.fallback;
 }
+// 一键快速挂机：按当前可达成（节点已解锁）的采集目标排好巡历队列并启动
+function quickIdlePreset(){
+  const cands = [];
+  ['qiaocai','caiyu','yu','caiyao'].forEach(kind=>{
+    actionTargets(kind).forEach(t=>{
+      const n = nodeOf(t.node);
+      if (n && nodeUnlocked(n)) cands.push({ kind, target:t.id, node:n.id, lvl:t.lvl||1 });
+    });
+  });
+  // 优先当前所在节点，其余按等级升序（贴合进度、不易被锁）
+  cands.sort((a,b)=>{
+    const ah = a.node===Game.node?0:1, bh = b.node===Game.node?0:1;
+    if (ah!==bh) return ah-bh;
+    return (a.lvl||1)-(b.lvl||1);
+  });
+  clearQueue();
+  const picked = cands.slice(0, QUEUE_MAX);
+  picked.forEach(c=> addQueueEntry(c.kind, c.target, 10));
+  const here = picked.find(c=>c.node===Game.node);
+  setFallback(here?here.kind:'idle', here?here.target:'', here?10:1);
+  Game.queueLoop = true; saveGame();
+  if (!Game.queueRunning && typeof toggleQueue==='function') toggleQueue();
+  if (typeof UI!=='undefined' && UI.renderQueue) UI.renderQueue();
+  if (UI && UI.toast) UI.toast(`🧭 已排 ${picked.length} 项巡历任务，开始挂机`);
+  return picked.length;
+}
 
 // ---------- 主驱动（由 gameLoop 调用） ----------
 function ensureQueueActivity(){
@@ -362,6 +406,8 @@ if (typeof window !== 'undefined'){
   window.entryLabel = entryLabel;
   window.entryUnit = entryUnit;
   window.entryProgressText = entryProgressText;
+  window.estimateQueueSeconds = estimateQueueSeconds;
+  window.estimateEntrySeconds = estimateEntrySeconds;
   window.entryCanRun = entryCanRun;
   window.startQueue = startQueue;
   window.pauseQueue = pauseQueue;
@@ -371,6 +417,7 @@ if (typeof window !== 'undefined'){
   window.moveQueueEntry = moveQueueEntry;
   window.clearQueue = clearQueue;
   window.setFallback = setFallback;
+  window.quickIdlePreset = quickIdlePreset;
   window.fallbackEntry = fallbackEntry;
   window.ensureQueueActivity = ensureQueueActivity;
   window.queueOnActionDone = queueOnActionDone;

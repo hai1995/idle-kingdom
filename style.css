@@ -66,6 +66,10 @@ button,.tab,.chip-btn,.icon-btn,.btn-mini{ -webkit-tap-highlight-color:transpare
 }
 .tab:hover{ color:var(--ink); background:var(--shell-2); }
 .tab.active{ color:var(--cinnabar); border-bottom-color:var(--cinnabar); font-weight:700; background:var(--paper); }
+.tab-badge{ display:inline-block; min-width:15px; height:15px; line-height:15px; margin-left:5px; padding:0 3px;
+  font-size:10px; text-align:center; border-radius:8px; color:#fff; background:var(--cinnabar); vertical-align:middle; }
+.tab-badge:empty{ display:none; }
+.tab-badge.on{ min-width:8px; width:8px; height:8px; padding:0; border-radius:50%; }
 
 /* ---------- 主区域 ---------- */
 #content{ flex:1; display:flex; flex-direction:column; gap:12px; }
@@ -142,6 +146,34 @@ button,.tab,.chip-btn,.icon-btn,.btn-mini{ -webkit-tap-highlight-color:transpare
 }
 .modal-btns{ display:flex; gap:8px; margin-top:12px; flex-wrap:wrap; }
 
+/* 玩法说明弹窗 */
+.help-body{ max-height:62vh; overflow-y:auto; margin:4px 0; }
+.help-sec{ padding:9px 0; border-bottom:1px dashed var(--line); }
+.help-sec:last-child{ border-bottom:none; }
+.help-sec > b{ display:block; font-size:13.5px; color:var(--azurite-d); margin-bottom:4px; }
+.help-sec .hint{ margin:0; line-height:1.7; }
+
+/* 征兆纪事时间线（祠祀页） */
+.omen-log-panel .omen-log-line{ padding:3px 0; font-size:12.5px; line-height:1.5; border-bottom:1px dashed var(--line); }
+.omen-log-panel .omen-log-line:last-child{ border-bottom:none; }
+/* 商旅推荐买卖 */
+.trade-tip{ background:rgba(217,165,33,.08); border:1px solid var(--gold); }
+.trade-tip h3{ color:var(--gold); }
+.trade-tip ul{ margin:6px 0 0; padding-left:18px; }
+.trade-tip li{ margin:3px 0; font-size:13px; }
+/* 征兆当前总效应预览 */
+.omen-summary{ padding:6px 10px; margin-bottom:8px; font-size:12.5px; background:rgba(140,90,60,.1); border:1px solid var(--line); border-radius:6px; line-height:1.6; }
+/* 墟市售价走势曲线 */
+.price-trend{ display:inline-flex; align-items:center; gap:6px; font-size:12px; color:var(--ink-2); }
+.price-trend .spark{ display:block; }
+
+/* 移动端：加大可点区域，避免误触 */
+@media (max-width:680px){
+  .tab{ padding:9px 11px; font-size:13px; }
+  .btn, .btn-mini, .icon-btn{ min-height:38px; }
+  .shop-card .btn, .sell-card .btn, .queue-item .btn{ min-height:34px; }
+}
+
 /* ---------- 舆地 ---------- */
 .map-wrap{ display:grid; grid-template-columns:200px 220px minmax(0,1fr); gap:12px; align-items:start; }
 .region-item{ padding:7px 10px; border:1px solid var(--ink-12); border-radius:4px; margin-bottom:6px; cursor:pointer; background:var(--paper); }
@@ -154,6 +186,10 @@ button,.tab,.chip-btn,.icon-btn,.btn-mini{ -webkit-tap-highlight-color:transpare
 .node-item:hover{ background:var(--shell-2); }
 .node-item.on{ background:var(--shell-2); border-left:3px solid var(--cinnabar); }
 .node-item.lock{ opacity:.5; }
+.node-item.rec{ box-shadow:inset 0 0 0 1px var(--azurite); background:rgba(46,92,138,.08); }
+.node-item.rec.tame{ box-shadow:inset 0 0 0 1px var(--cinnabar); background:rgba(195,39,43,.08); }
+.rec-tag{ font-size:10px; color:#fff; border-radius:3px; padding:0 4px; margin-left:2px; background:var(--azurite); }
+.rec-tag.tame{ background:var(--cinnabar); }
 .node-item.here{ color:var(--malachite-d); font-weight:700; }
 .node-item .nlv{ margin-left:auto; font-size:11px; color:var(--ink-60); }
 .node-item .haz{ color:var(--cinnabar); }
@@ -295,6 +331,17 @@ button,.tab,.chip-btn,.icon-btn,.btn-mini{ -webkit-tap-highlight-color:transpare
 .qi-idx{ width:18px; color:var(--ink-60); }
 .qi-name{ flex:1; }
 .qi-prog{ font-size:11px; color:var(--azurite-d); }
+.qi-eta{ font-size:11px; color:var(--ink-60); margin-left:4px; }
+/* 五行克制提示 */
+.wuxing-tip{ font-size:12px; padding:4px 8px; margin:6px 0; border-radius:6px; background:rgba(140,90,60,.08); }
+.wuxing-tip.good{ color:var(--jade); background:rgba(74,124,89,.12); }
+.wuxing-tip.bad{ color:var(--cinnabar); background:rgba(195,39,43,.1); }
+.wuxing-tip .wux-btn{ margin-left:8px; padding:2px 8px; font-size:11px; }
+.beast-card .el-btn{ margin-left:2px; padding:1px 7px; font-size:11px; vertical-align:middle; }
+/* 战斗预估 */
+.combat-est{ font-size:12px; padding:4px 8px; margin:6px 0; border-radius:6px; background:rgba(140,90,60,.08); }
+.combat-est.good{ color:var(--jade); background:rgba(74,124,89,.12); }
+.combat-est.bad{ color:var(--cinnabar); background:rgba(195,39,43,.1); }
 .qi-reason{ font-size:10.5px; color:var(--cinnabar); }
 .qi-btns{ display:flex; gap:2px; }
 .queue-ctrl{ display:flex; gap:8px; align-items:center; flex-wrap:wrap; margin-top:10px; font-size:12.5px; }
@@ -334,6 +381,30 @@ button,.tab,.chip-btn,.icon-btn,.btn-mini{ -webkit-tap-highlight-color:transpare
 #modal{ position:fixed; inset:0; background:rgba(43,43,43,.45); display:flex; align-items:center; justify-content:center; z-index:60; padding:16px; }
 #modalBox{ background:var(--paper); border-radius:8px; padding:18px; max-width:520px; width:100%; max-height:86vh; overflow-y:auto; box-shadow:0 8px 40px rgba(0,0,0,.3); border-top:4px solid var(--cinnabar); }
 #modalBox h3{ color:var(--azurite-d); margin-bottom:8px; }
+
+/* 新手引导卡片 */
+.tut-card{ line-height:1.5; }
+.tut-head{ font-size:17px; margin-bottom:12px; color:var(--azurite-d); }
+.tut-body{ font-size:13.5px; line-height:1.85; color:var(--ink); }
+.tut-body b{ color:var(--cinnabar); }
+.tut-dots{ display:flex; gap:7px; margin:18px 0 4px; }
+.tut-dot{ width:8px; height:8px; border-radius:50%; background:var(--ink-30); transition:background .25s,transform .25s; }
+.tut-dot.on{ background:var(--azurite); transform:scale(1.3); }
+.tut-dot.done{ background:var(--malachite); }
+.tut-btns{ justify-content:flex-end; gap:8px; }
+
+/* 舆地页常驻「下一步建议」指引条 */
+.hint-banner{
+  display:flex; align-items:flex-start; gap:8px; margin-bottom:12px;
+  padding:10px 14px; border-radius:6px; font-size:13px; line-height:1.6; color:var(--ink);
+  background:linear-gradient(90deg, rgba(46,92,138,.12), rgba(244,241,232,.4));
+  border-left:4px solid var(--azurite); box-shadow:0 1px 4px rgba(0,0,0,.05);
+}
+.hint-banner span{ flex:1; }
+/* 全局指引条（吸顶区域底部的一条，疆里页用自带条故隐藏） */
+#guidance{ margin:0; border-radius:0; border-left:none; border-bottom:1px solid var(--line); }
+#guidance.hidden{ display:none; }
+#guidance .goto{ margin-left:auto; color:var(--azurite); font-size:12px; white-space:nowrap; }
 #modalBox textarea{ width:100%; height:140px; font-family:monospace; font-size:11px; border:1px solid var(--ink-30); border-radius:4px; padding:8px; }
 #toasts{ position:fixed; top:14px; right:14px; z-index:80; display:flex; flex-direction:column; gap:8px; }
 .toast{

@@ -520,8 +520,8 @@ loadJS('ui.js');
 // 等先加载脚本里的 UI 仍指向桩对象。
 context.UI = ST.UI;
 const renderTargets = {};
-const mkTarget = ()=>({ innerHTML:'', dataset:{}, style:{}, classList:{ add(){}, remove(){}, toggle(){} }, textContent:'', value:'', checked:false });
-['content','tabs','toasts','modal','modalBox','logList','actionProg','actionProgFill','activityText','hpDisplay','buffDisplay','shellCount','totalLevel','maxSkill','recordCount','omenCount','btnSettings','btnSave','btnStop'].forEach(t=>renderTargets[t]=mkTarget());
+const mkTarget = ()=>({ innerHTML:'', dataset:{}, style:{}, classList:{ add(){}, remove(){}, toggle(){} }, textContent:'', value:'', checked:false, appendChild(){}, remove(){} });
+['content','tabs','toasts','modal','modalBox','logList','actionProg','actionProgFill','activityText','hpDisplay','buffDisplay','shellCount','totalLevel','maxSkill','recordCount','omenCount','guidance','btnSettings','btnSave','btnStop'].forEach(t=>renderTargets[t]=mkTarget());
 renderTargets.tabs.innerHTML = '';
 renderTargets.tabs.querySelectorAll = () => [];
 context.document.getElementById = (id)=> renderTargets[id] || {
@@ -558,6 +558,203 @@ G.startCombat('shengsheng', { focus:true });
 assert(ST.UI.currentTab === 'taofa', '手动往讨才切到征伐页');
 ST.Game.combat = null;
 ST.Game.combat = null;
+
+// ============ 16.5 新手引导 · 离线汇总 ============
+section('新手引导 · 离线汇总');
+let offOk = true;
+try { ST.UI.showOfflineSummary({ seconds:7200, xp:1234, items:{ gui:10 }, records:3, harvests:1 }); }
+catch(e){ offOk = false; console.error('离线弹窗异常：'+e.stack); }
+assert(offOk, '离线归来弹窗渲染不抛错');
+assert(renderTargets.modalBox.innerHTML.indexOf('离线归来') >= 0, '离线弹窗含标题');
+assert(typeof ST.showTutorial === 'function' && typeof ST.tutFinish === 'function', '教程函数齐备');
+let tutOk = true;
+try { ST.showTutorial(); ST.tutNext(); ST.tutNext(); ST.tutPrev(); } catch(e){ tutOk = false; console.error('教程异常：'+e.stack); }
+assert(tutOk, '教程分步切换不抛错');
+ST.tutFinish();
+assert(context.localStorage.getItem('shj_tut_done_v1') === '1', '教程完成写入标记（不再自动弹出）');
+// 下一步建议：函数存在、返回有效文本、舆地页含指引条
+assert(typeof G.nextHint === 'function', 'nextHint 函数存在');
+let hintOk = true, hint;
+try { hint = G.nextHint(); } catch(e){ hintOk = false; console.error('nextHint 异常：'+e.stack); }
+assert(hintOk && hint && typeof hint.text === 'string' && hint.text.length > 0, 'nextHint 返回有效建议');
+ST.UI.currentTab = 'yudi'; ST.UI.renderYudi();
+assert(renderTargets.content.innerHTML.indexOf('hint-banner') >= 0, '舆地页渲染指引条');
+// 临阶突破提示（修正后应当可达：用下一阶阈值而非当前阶）
+const _rec = ST.Game.records, _dep = ST.Game.deployed, _map = ST.Game.map;
+let nearOk = true;
+try {
+  const allNodes = {}; ST.WORLD.regions.forEach(r=>r.nodes.forEach(n=>allNodes[n.id]=true));
+  const itemId = Object.keys(ST.Items).find(k=>!ST.Monsters[k]);   // 取一个纯物品（非异兽）条目
+  ST.Game.records = { [itemId]:{count:97,tier:3} }; ST.Game.deployed = {}; ST.Game.map = allNodes;
+  const h2 = G.nextHint();
+  nearOk = /再著录/.test(h2.text);
+} catch(e){ nearOk = false; console.error('nextHint 临阶异常：'+e.stack); }
+assert(nearOk, '临阶突破提示可达（count 97 / tier3 → 再著录 3 次）');
+ST.Game.records = _rec; ST.Game.deployed = _dep; ST.Game.map = _map;
+
+// ============ 16.10 玩法说明弹窗 ============
+section('玩法说明弹窗');
+assert(typeof ST.openHelp === 'function', 'openHelp 函数存在');
+let helpOk = true;
+try { ST.openHelp(); } catch(e){ helpOk = false; console.error('玩法说明异常：'+e.stack); }
+assert(helpOk, '玩法说明渲染不抛错');
+assert(renderTargets.modalBox.innerHTML.indexOf('玩法说明') >= 0, '玩法说明含标题');
+assert(renderTargets.modalBox.innerHTML.indexOf('五行') >= 0, '玩法说明含五行相克');
+assert(renderTargets.modalBox.innerHTML.indexOf('著录') >= 0, '玩法说明含著录阶位');
+
+// ============ 16.11 一键快速挂机 ============
+section('一键快速挂机');
+assert(typeof G.quickIdlePreset === 'function', 'quickIdlePreset 函数存在');
+const _q = ST.Game.queue, _qr = ST.Game.queueRunning, _fb = ST.Game.fallback, _loop = ST.Game.queueLoop;
+let qOk = true, qN = 0;
+try { qN = G.quickIdlePreset(); } catch(e){ qOk = false; console.error('快速挂机异常：'+e.stack); }
+assert(qOk, '快速挂机不抛错');
+assert(qN > 0 && ST.Game.queue.length > 0, '快速挂机排入了任务');
+ST.Game.queue = _q; ST.Game.queueRunning = _qr; ST.Game.fallback = _fb; ST.Game.queueLoop = _loop;
+ST.UI.currentTab = 'yudi'; ST.UI.renderYudi();
+// 推荐节点高亮：节点模板含 rec 类
+assert(renderTargets.content.innerHTML.indexOf('node-item') >= 0, '舆地页渲染节点');
+// 页签角标刷新不抛错
+let tbOk = true; try { G.refreshTabBadges(); } catch(e){ tbOk = false; console.error('刷新角标异常：'+e.stack); }
+assert(tbOk, '页签角标刷新不抛错');
+// 全局指引条：非舆地页签下 refreshActivity 应填充
+ST.UI.currentTab = 'codex'; ST.UI.refreshActivity();
+assert(renderTargets.guidance.innerHTML.indexOf('<span>') >= 0, '全局指引条在其它页签填充建议');
+assert((ST.Game.records && Object.keys(ST.Game.records).length > 0 ? renderTargets.guidance.innerHTML.indexOf('前往') >= 0 : true), '有可跳转指引时显示「前往」');
+
+// 状态栏常驻增益摘要（御使 / 征兆）
+const _dep2 = ST.Game.deployed, _om2 = ST.Game.omens, _buff2 = ST.Game.buff;
+let psOk = true, psTxt = '';
+try { ST.Game.deployed = { 0:'shengsheng' }; ST.Game.buff = null; ST.UI.renderTopbar(); psTxt = renderTargets.buffDisplay.textContent; }
+catch(e){ psOk = false; console.error('增益摘要异常：'+e.stack); }
+assert(psOk && psTxt.indexOf('御使') >= 0, '状态栏显示御使增益摘要');
+ST.Game.deployed = _dep2; ST.Game.omens = _om2; ST.Game.buff = _buff2;
+
+// ============ 16.8 征兆纪事 · 推荐买卖 · 手势 ============
+section('征兆纪事 · 推荐买卖 · 手势');
+// 祠祀页渲染征兆纪事时间线
+let omOk = true;
+try {
+  ST.UI.logEntries.unshift({ msg:'测试征兆', color:'gold', cat:'omen', t:Date.now() });
+  ST.UI.currentTab = 'jisi'; ST.UI.renderJisi();
+  omOk = renderTargets.content.innerHTML.indexOf('征兆纪事') >= 0;
+} catch(e){ omOk = false; console.error('征兆纪事异常：'+e.stack); }
+assert(omOk, '祠祀页渲染征兆纪事');
+// 统计日志含征兆筛选
+let omFilter = true;
+try { ST.UI.currentTab = 'stats'; ST.UI.renderStats(); omFilter = renderTargets.content.innerHTML.indexOf('征兆') >= 0; }
+catch(e){ omFilter = false; console.error('征兆筛选异常：'+e.stack); }
+assert(omFilter, '日志含征兆筛选');
+// 推荐买卖：清空著录后墟市给出购入即录提示
+const _rec3 = ST.Game.records;
+let tiOk = true, tiTxt = '';
+try { ST.Game.records = {}; ST.UI.currentTab = 'shichan'; ST.UI.renderShichan(); tiTxt = renderTargets.content.innerHTML; }
+catch(e){ tiOk = false; console.error('推荐买卖异常：'+e.stack); }
+assert(tiOk && tiTxt.indexOf('推荐买卖') >= 0, '墟市显示推荐买卖');
+ST.Game.records = _rec3;
+// 手势：相邻页签切换（含环绕）
+ST.UI.currentTab = 'yudi'; ST.UI.switchTabNeighbor(1);
+assert(ST.UI.currentTab === 'skills', '左滑切到下一页签');
+ST.UI.switchTabNeighbor(-1);
+assert(ST.UI.currentTab === 'yudi', '右滑切回上一页签');
+ST.UI.switchTabNeighbor(-1);
+assert(ST.UI.currentTab === 'stats', '右滑在首页环绕到末页');
+
+// ============ 16.9 征兆数值预览 · 售价走势 ============
+section('征兆数值预览 · 售价走势');
+// 征兆当前总效应：植入一个全局产出+15%的征兆
+const _om3 = ST.Game.omens;
+let oeOk = true, oeTxt = '';
+try {
+  ST.Game.omens = [{ id:'fenghuang', until: (typeof gameTime==='function'?gameTime():0)+3600, soft:1 }];
+  ST.UI.currentTab = 'jisi'; ST.UI.renderJisi();
+  oeTxt = renderTargets.content.innerHTML;
+} catch(e){ oeOk = false; console.error('征兆预览异常：'+e.stack); }
+assert(oeOk && oeTxt.indexOf('当前总效应') >= 0 && oeTxt.indexOf('全局产出') >= 0, '祠祀页显示征兆当前总效应');
+ST.Game.omens = _om3;
+// 售价走势：预设历史两点后应渲染曲线
+const _ph = ST.Game.priceHistory;
+let spOk = true, spTxt = '';
+try {
+  ST.Game.priceHistory = [{ t:0, m:1 }, { t:1, m:1.2 }];
+  ST.UI.currentTab = 'shichan'; ST.UI.renderShichan();
+  spTxt = renderTargets.content.innerHTML;
+} catch(e){ spOk = false; console.error('售价走势异常：'+e.stack); }
+assert(spOk && spTxt.indexOf('售价走势') >= 0 && spTxt.indexOf('spark') >= 0, '墟市渲染售价走势曲线');
+ST.Game.priceHistory = _ph;
+
+// ============ 16.10 队列预估耗时 ============
+section('队列预估耗时');
+const _q2 = ST.Game.queue;
+let etaOk = true, etaTxt = '';
+try {
+  ST.Game.queue = [{ id:'t1', kind:'qiaocai', target:'mu', node:'xishan-1-01', qty:10, done:0 }];
+  ST.UI.currentTab = 'queue'; ST.UI.renderQueue();
+  etaTxt = renderTargets.content.innerHTML;
+} catch(e){ etaOk = false; console.error('队列ETA异常：'+e.stack); }
+assert(etaOk && etaTxt.indexOf('预计一轮') >= 0, '队列显示预计一轮耗时');
+assert(etaTxt.indexOf('约') >= 0, '队列条目显示单条预计耗时');
+ST.Game.queue = _q2;
+
+// ============ 16.11 五行克制提示 ============
+section('五行克制提示');
+let waOk = true, wa1 = '', wa2 = '', wa3 = '';
+try {
+  wa1 = ST.wuxingAdvice('金','木');   // 金克木
+  wa2 = ST.wuxingAdvice('木','金');   // 木被金克
+  wa3 = ST.wuxingAdvice('水','火');   // 水克火
+} catch(e){ waOk = false; console.error('五行提示异常：'+e.stack); }
+assert(waOk, 'wuxingAdvice 不抛错');
+assert(wa1.indexOf('克制') >= 0 && wa1.indexOf('宜用') >= 0, '金克木显示克制与宜用');
+assert(wa2.indexOf('被克') >= 0, '木对金显示被克');
+assert(wa3.indexOf('克制') >= 0, '水克火显示克制');
+// 未占优时给出一键切克按钮（木对金：克金宜用木）
+assert(wa2.indexOf('切克') >= 0 && wa2.indexOf('木') >= 0, '未克制时显示一键切克按钮');
+// 已克制时不显示按钮（金克木）
+assert(wa1.indexOf('切克') < 0, '已克制时不显示切克按钮');
+
+// ============ 16.12 战斗预估耗时 ============
+section('战斗预估耗时');
+let ceOk = true, ceTxt = '';
+try { ceTxt = ST.combatEstimateHtml({ hp:100, atk:10 }, null); }
+catch(e){ ceOk = false; console.error('战斗预估异常：'+e.stack); }
+assert(ceOk, 'combatEstimateHtml 不抛错');
+assert(ceTxt.indexOf('预计击杀') >= 0 && ceTxt.indexOf('DPS') >= 0, '战斗显示预计击杀与双方 DPS');
+
+// ============ 16.13 讨伐目标卡宜用属性按钮 ============
+section('讨伐目标卡宜用属性');
+let ebOk = true, ebTxt = '';
+try { ST.UI.currentTab = 'taofa'; ST.UI.renderTaofa(); ebTxt = renderTargets.content.innerHTML; }
+catch(e){ ebOk = false; console.error('目标卡异常：'+e.stack); }
+assert(ebOk && ebTxt.indexOf('宜用') >= 0 && ebTxt.indexOf('setZhuEl') >= 0, '讨伐目标卡宜用属性可一键切换');
+
+// ============ 16.7 御使引导 · 连胜 ============
+section('御使引导 · 连胜');
+assert(typeof ST.UI.maybeShowDeployHint === 'function', 'maybeShowDeployHint 存在');
+let dhOk = true;
+try {
+  ST.Game.stats.seenDeployHint = false;
+  ST.UI.maybeShowDeployHint({ id:'__t', name:'试兽', boss:false });
+} catch(e){ dhOk = false; console.error('御使引导异常：'+e.stack); }
+assert(dhOk, '御使引导不抛错');
+assert(ST.Game.stats.seenDeployHint === true, '御使引导写入标记');
+assert(renderTargets.modalBox.innerHTML.indexOf('可御使') >= 0, '御使引导弹窗含提示');
+// 连胜计数：meetKill 累加、onPlayerDeath 归零
+const wsBefore = ST.Game.stats.winStreak || 0;
+G.meetKill({ monsterId:'shengsheng' }, ST.Monsters.shengsheng);
+assert((ST.Game.stats.winStreak||0) > wsBefore, '击杀累计连胜');
+G.onPlayerDeath({ monsterId:'shengsheng' }, ST.Monsters.shengsheng);
+assert(ST.Game.stats.winStreak === 0, '战败重置连胜');
+
+// ============ 16.8 新山系解锁提示 ============
+section('新山系解锁提示');
+let ruOk = true;
+try {
+  ST.Game.stats._unlockedRegions = [];
+  G.gainXp('yudi', 5000);   // 大幅升级舆地，应解锁并把山系写入集合
+  ruOk = Array.isArray(ST.Game.stats._unlockedRegions) && ST.Game.stats._unlockedRegions.length >= 1;
+} catch(e){ ruOk = false; console.error('解锁检测异常：'+e.stack); }
+assert(ruOk, '等级提升后写入已解锁山系集合');
 
 // ============ 17. 合规与布局审计 ============
 section('合规与布局审计');

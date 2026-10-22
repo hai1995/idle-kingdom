@@ -65,6 +65,7 @@ function checkMilestoneToast(){
       seen[ms.id] = true; newly++;
       log(`🏅 长线成就：${ms.name} —— ${ms.bonus}`, 'gold', 'sys');
       UI && UI.toast(`🏅 ${ms.name}\n${ms.bonus}`);
+      if (typeof FX !== 'undefined' && FX.burst) FX.burst((window.innerWidth||300)/2, (window.innerHeight||500)/3, '🏅', 14);
     }
   });
   if (newly) saveGame();
@@ -192,7 +193,7 @@ function activateOmen(id){
   }
   Game.stats.omens[id] = true;
   const mark = def.polarity === '凶' ? '🔴' : def.polarity === '吉' ? '🟢' : '🟡';
-  log(`${mark} 征兆·${def.type}：${def.desc}（${def.beast}）`, def.polarity==='凶'?'bad':'gold', 'sys');
+  log(`${mark} 征兆·${def.type}：${def.desc}（${def.beast}）`, def.polarity==='凶'?'bad':'gold', 'omen');
   UI && UI.toast(`${mark} 征兆·${def.type}\n${def.desc}`);
   saveGame();
 }
@@ -349,6 +350,10 @@ function recordObject(objId, n){
     gainXp('zhulu', 30*(r.tier+1));
     log(`📜 著录进阶：${name} —— ${TUNING.MASTERY.NAMES[r.tier]}`, 'gold', 'skill');
     UI && UI.toast(`📜 ${name} 著录至「${TUNING.MASTERY.NAMES[r.tier]}」`);
+  }
+  // 首次可御使（著录至通形）的入槽引导
+  if (r.tierUp && beast && !beast.boss && r.tier >= 3 && !Object.values(Game.deployed).includes(objId)){
+    if (UI && UI.maybeShowDeployHint) UI.maybeShowDeployHint(beast);
   }
   return r;
 }
@@ -904,6 +909,12 @@ function autoEat(c){
 function meetKill(c, m){
   const isBoss = !!m.boss;
   Game.stats.kills++;
+  // 连胜计数与轻量庆祝
+  Game.stats.winStreak = (Game.stats.winStreak||0) + 1;
+  if (UI && (Game.stats.winStreak === 3 || (Game.stats.winStreak >= 5 && Game.stats.winStreak % 5 === 0))){
+    UI.toast(`🔥 连胜 ${Game.stats.winStreak} 场！`);
+    if (typeof FX !== 'undefined' && FX.burst) FX.burst((window.innerWidth||300)/2, (window.innerHeight||500)/3, '🔥', 10);
+  }
   if (isBoss){
     Game.stats.bossKills[m.id] = true;
     UI && UI.log(`🏆 讨平 ${m.name}！`, 'gold', 'combat');
@@ -947,6 +958,7 @@ window.pushRecentLoot = pushRecentLoot;
 
 function onPlayerDeath(c, m){
   Game.stats.deaths++;
+  Game.stats.winStreak = 0;
   log(`💀 汝为 ${m.name} 所败`, 'bad', 'combat');
   UI && UI.deathFloat();
   const lastId = c && c.monsterId;
@@ -1108,6 +1120,9 @@ function gameLoop(){
     if (rec && typeof UI !== 'undefined'){
       if (UI.refreshAll) UI.refreshAll();
       if (typeof renderCurrent === 'function') renderCurrent();
+      const hasGain = rec.xp > 0 || Object.keys(rec.items||{}).length || (rec.records||0) > 0 || (rec.harvests||0) > 0;
+      if (hasGain && rec.seconds >= 120 && UI.showOfflineSummary) UI.showOfflineSummary(rec);
+      else if (hasGain && UI.toast) UI.toast(`🌙 离山 ${Math.floor(rec.seconds/60)} 分，修得经验 +${Math.round(rec.xp)}`);
     }
   }
   if (UI && UI.tickProgress) UI.tickProgress();

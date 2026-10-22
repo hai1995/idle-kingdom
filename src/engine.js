@@ -27,7 +27,7 @@ const Game = {
     kills:0, deaths:0, actions:0, totalXp:0, time:0, bossKills:{}, totalEarned:0,
     harvests:0, purchases:0, sales:0, spent:0, sold:0, gathers:{}, crafts:0,
     damageDealt:0, damageTaken:0, hits:0, omens:{}, rites:0, observes:0, divines:0,
-    seenMilestones:{},
+    seenMilestones:{}, winStreak:0, seenDeployHint:false, _unlockedRegions:[],
   },
   startedAt: Date.now(),
   version: 2,
@@ -60,7 +60,7 @@ function cloneDefaultGame(){
   g.stats = { kills:0, deaths:0, actions:0, totalXp:0, time:0, bossKills:{}, totalEarned:0,
               harvests:0, purchases:0, sales:0, spent:0, sold:0, gathers:{}, crafts:0,
               damageDealt:0, damageTaken:0, hits:0, omens:{}, rites:0, observes:0, divines:0,
-              seenMilestones:{} };
+              seenMilestones:{}, winStreak:0, seenDeployHint:false, _unlockedRegions:[] };
   return g;
 }
 
@@ -236,6 +236,18 @@ function gainXp(skillId, amount){
       }
     } finally { _inGainXp = false; }
   }
+  checkRegionUnlocks();
+}
+// 新山系解锁提示：舆地/履险升级后比对已解锁集合，首次出现者浮条通知
+function checkRegionUnlocks(){
+  const known = Game.stats._unlockedRegions || (Game.stats._unlockedRegions = []);
+  (WORLD.regions||[]).forEach(r=>{
+    if (regionUnlocked(r) && !known.includes(r.regionId)){
+      known.push(r.regionId);
+      if (UI) UI.toast(`🔓 新山系解锁：${r.regionName}`);
+      if (typeof log === 'function') log(`🔓 新山系解锁：${r.regionName}`, 'yudi', 'sys');
+    }
+  });
 }
 function levelOf(skillId){ return (Game.skills[skillId]||{}).level || 1; }
 function totalSkillLevel(){
